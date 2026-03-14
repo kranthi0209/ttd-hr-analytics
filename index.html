@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🕉️ TTD HR Analytics Dashboard</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+    <!-- Loading Screen -->
+    <div id="loadingScreen" class="loading-screen">
+        <div class="loader-container">
+            <div class="loader-ring"></div>
+            <div class="loader-ring delay1"></div>
+            <div class="loader-ring delay2"></div>
+            <div class="loader-text">
+                <span class="loader-logo" style="font-size:2.5rem">🕉️</span>
+                <h2>TTD HR Analytics</h2>
+                <p id="loadingMsg">Loading employee records...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Sidebar Navigation -->
+    <nav id="sidebar" class="sidebar">
+        <div class="sidebar-header">
+            <div class="sidebar-logo">
+                <span class="logo-icon" style="font-size:2rem">🕉️</span>
+                <div class="logo-text">
+                    <h1 style="font-family:'Cinzel',serif">TTD</h1>
+                    <span>HR Analytics</span>
+                </div>
+            </div>
+            <button class="sidebar-toggle" id="sidebarToggle" aria-label="Toggle sidebar">
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+            </button>
+        </div>
+        <ul class="nav-menu">
+            <li class="nav-item active" data-page="dashboard">
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><rect x="2" y="2" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.5"/><rect x="11" y="2" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.5"/><rect x="2" y="11" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.5"/><rect x="11" y="11" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.5"/></svg>
+                <span>Dashboard</span>
+            </li>
+            <li class="nav-item" data-page="datatable">
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M3 4h14M3 8h14M3 12h14M3 16h14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                <span>Data Table</span>
+            </li>
+            <li class="nav-item" data-page="pivot">
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><rect x="2" y="2" width="16" height="16" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M2 7h16M7 2v16" stroke="currentColor" stroke-width="1.5"/></svg>
+                <span>Pivot Table</span>
+            </li>
+            <li class="nav-item" data-page="pivotchart">
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M3 17V8M7 17V5M11 17V9M15 17V3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                <span>Pivot Chart</span>
+            </li>
+        </ul>
+        <div class="sidebar-footer">
+            <div class="sidebar-info">
+                <span class="info-label">Data Source</span>
+                <span class="info-value">HRMAPS Portal</span>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Mobile Header -->
+    <header class="mobile-header" id="mobileHeader">
+        <button class="mobile-menu-btn" id="mobileMenuBtn" aria-label="Open menu">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M3 6h18M3 12h18M3 18h18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+        <h1>🕉️ TTD HR Analytics</h1>
+    </header>
+
+    <!-- Main Content -->
+    <main id="mainContent" class="main-content">
+
+        <!-- ========== PAGE 1: DASHBOARD ========== -->
+        <section id="page-dashboard" class="page active">
+            <!-- Filters Bar -->
+            <div class="filters-bar" id="dashFilters">
+                <div class="filters-header">
+                    <h3>🔍 Filters</h3>
+                    <div style="display:flex;gap:8px;align-items:center">
+                        <div class="column-toggle-container">
+                            <button class="btn btn-outline btn-sm" id="dashSelectFiltersBtn">⚙️ Select Filters</button>
+                            <div class="column-toggle-dropdown" id="dashSelectFiltersDropdown"></div>
+                        </div>
+                        <button class="btn btn-ghost btn-sm" id="dashClearFilters">Clear All</button>
+                    </div>
+                </div>
+                <div class="filters-grid" id="dashFiltersGrid" style="margin-top:12px"></div>
+                <div class="filters-grid" style="margin-top:8px">
+                    <div class="filter-group slider-group">
+                        <label>Service in Current Post (Years)</label>
+                        <div class="range-slider-container">
+                            <input type="range" id="fDashServiceMin" min="0" max="40" value="0" class="range-slider">
+                            <input type="range" id="fDashServiceMax" min="0" max="40" value="40" class="range-slider">
+                            <div class="range-values">
+                                <span id="fDashServiceMinVal">0</span>
+                                <span> – </span>
+                                <span id="fDashServiceMaxVal">40</span>
+                                <span> years</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- KPI Cards -->
+            <div class="kpi-row" id="kpiRow">
+                <div class="kpi-card">
+                    <div class="kpi-icon blue">👥</div>
+                    <div class="kpi-content">
+                        <span class="kpi-value" id="kpiTotal">0</span>
+                        <span class="kpi-orig" id="kpiTotalOrig"></span>
+                        <span class="kpi-label">Total Sanctioned Posts</span>
+                    </div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-icon green">✅</div>
+                    <div class="kpi-content">
+                        <span class="kpi-value" id="kpiOccupied">0</span>
+                        <span class="kpi-orig" id="kpiOccupiedOrig"></span>
+                        <span class="kpi-label">Occupied Posts</span>
+                    </div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-icon red">⚠️</div>
+                    <div class="kpi-content">
+                        <span class="kpi-value" id="kpiVacant">0</span>
+                        <span class="kpi-orig" id="kpiVacantOrig"></span>
+                        <span class="kpi-label">Vacant Posts</span>
+                    </div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-icon amber">🏢</div>
+                    <div class="kpi-content">
+                        <span class="kpi-value" id="kpiDepts">0</span>
+                        <span class="kpi-orig" id="kpiDeptsOrig"></span>
+                        <span class="kpi-label">Departments</span>
+                    </div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-icon purple">📋</div>
+                    <div class="kpi-content">
+                        <span class="kpi-value" id="kpiDesignations">0</span>
+                        <span class="kpi-orig" id="kpiDesignationsOrig"></span>
+                        <span class="kpi-label">Designations</span>
+                    </div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-icon teal">📅</div>
+                    <div class="kpi-content">
+                        <span class="kpi-value" id="kpiAvgService">0</span>
+                        <span class="kpi-orig" id="kpiAvgServiceOrig"></span>
+                        <span class="kpi-label">Avg. Service (Yrs)</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Charts Grid -->
+            <div class="charts-grid">
+                <div class="chart-card large">
+                    <div class="chart-header">
+                        <h3>Department-wise Strength</h3>
+                        <div class="chart-actions">
+                            <button class="btn-icon" title="Expand" onclick="toggleChartFullscreen(this)">⛶</button>
+                        </div>
+                    </div>
+                    <div class="chart-body"><canvas id="chartDeptStrength"></canvas></div>
+                </div>
+                <div class="chart-card">
+                    <div class="chart-header"><h3>Community Distribution</h3></div>
+                    <div class="chart-body"><canvas id="chartCommunity"></canvas></div>
+                </div>
+                <div class="chart-card">
+                    <div class="chart-header"><h3>Gender Distribution</h3></div>
+                    <div class="chart-body"><canvas id="chartGender"></canvas></div>
+                </div>
+                <div class="chart-card">
+                    <div class="chart-header"><h3>Recruitment Type</h3></div>
+                    <div class="chart-body"><canvas id="chartRecruitment"></canvas></div>
+                </div>
+                <div class="chart-card">
+                    <div class="chart-header"><h3>Joined During (Govt Rule)</h3></div>
+                    <div class="chart-body"><canvas id="chartJoined"></canvas></div>
+                </div>
+                <div class="chart-card large">
+                    <div class="chart-header"><h3>Age Distribution</h3></div>
+                    <div class="chart-body"><canvas id="chartAge"></canvas></div>
+                </div>
+                <div class="chart-card">
+                    <div class="chart-header"><h3>Retirement Forecast (Next 5 Years)</h3></div>
+                    <div class="chart-body"><canvas id="chartRetirement"></canvas></div>
+                </div>
+                <div class="chart-card">
+                    <div class="chart-header"><h3>Top 15 Designations</h3></div>
+                    <div class="chart-body"><canvas id="chartDesignations"></canvas></div>
+                </div>
+                <div class="chart-card">
+                    <div class="chart-header"><h3>Posted During (Govt. Rule)</h3></div>
+                    <div class="chart-body"><canvas id="chartPostedDuring"></canvas></div>
+                </div>
+                <div class="chart-card">
+                    <div class="chart-header"><h3>Present Post Posted In</h3></div>
+                    <div class="chart-body"><canvas id="chartPostedBy"></canvas></div>
+                </div>
+            </div>
+            <div class="page-footer">&#169; Muddada Ravi Chandra IAS, EO, TTD</div>
+        </section>
+
+        <!-- ========== PAGE 2: DATA TABLE ========== -->
+        <section id="page-datatable" class="page">
+            <div class="filters-bar" id="tableFilters">
+                <div class="filters-header">
+                    <h3>🔍 Filters</h3>
+                    <div style="display:flex;gap:8px;align-items:center">
+                        <div class="column-toggle-container">
+                            <button class="btn btn-outline btn-sm" id="tableSelectFiltersBtn">⚙️ Select Filters</button>
+                            <div class="column-toggle-dropdown" id="tableSelectFiltersDropdown"></div>
+                        </div>
+                        <button class="btn btn-ghost btn-sm" id="tableClearFilters">Clear All</button>
+                    </div>
+                </div>
+                <div class="filters-grid" style="margin-top:12px">
+                    <div class="filter-group">
+                        <label>Search Employee</label>
+                        <input type="text" id="fTableSearch" class="filter-input" placeholder="Name, ID, Designation...">
+                    </div>
+                </div>
+                <div class="filters-grid" id="tableFiltersGrid" style="margin-top:8px"></div>
+                <div class="filters-grid" style="margin-top:8px">
+                    <div class="filter-group slider-group">
+                        <label>Service in Current Post (Years)</label>
+                        <div class="range-slider-container">
+                            <input type="range" id="fTableServiceMin" min="0" max="40" value="0" class="range-slider">
+                            <input type="range" id="fTableServiceMax" min="0" max="40" value="40" class="range-slider">
+                            <div class="range-values">
+                                <span id="fTableServiceMinVal">0</span>
+                                <span> – </span>
+                                <span id="fTableServiceMaxVal">40</span>
+                                <span> years</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="table-toolbar">
+                <div class="table-info">
+                    <span id="tableRecordCount">0 records</span>
+                    <div class="column-toggle-container">
+                        <button class="btn btn-outline btn-sm" id="colToggleBtn">⚙️ Columns</button>
+                        <div class="column-toggle-dropdown" id="colToggleDropdown"></div>
+                    </div>
+                </div>
+                <div class="table-actions">
+                    <button class="btn btn-primary btn-sm" onclick="exportTableExcel()">📥 Excel</button>
+                </div>
+            </div>
+            <div class="table-wrapper" id="dataTableWrapper">
+                <table class="data-table" id="dataTable">
+                    <thead id="dataTableHead"></thead>
+                    <tbody id="dataTableBody"></tbody>
+                </table>
+            </div>
+            <div class="table-pagination" id="tablePagination">
+                <div class="pagination-info">
+                    <span>Rows per page:</span>
+                    <select id="pageSize" class="filter-select mini">
+                        <option value="25">25</option>
+                        <option value="50" selected>50</option>
+                        <option value="100">100</option>
+                        <option value="200">200</option>
+                    </select>
+                    <span id="paginationInfo"></span>
+                </div>
+                <div class="pagination-controls">
+                    <button class="btn btn-ghost btn-sm" id="btnFirst">⟪</button>
+                    <button class="btn btn-ghost btn-sm" id="btnPrev">◀</button>
+                    <span id="pageIndicator"></span>
+                    <button class="btn btn-ghost btn-sm" id="btnNext">▶</button>
+                    <button class="btn btn-ghost btn-sm" id="btnLast">⟫</button>
+                </div>
+            </div>
+            <div class="page-footer">&#169; Muddada Ravi Chandra IAS, EO, TTD</div>
+        </section>
+
+        <!-- ========== PAGE 3: PIVOT TABLE ========== -->
+        <section id="page-pivot" class="page">
+            <!-- Pivot Filters Bar -->
+            <div class="filters-bar" id="pivotFiltersBar">
+                <div class="filters-header">
+                    <h3>🔍 Filters</h3>
+                    <div style="display:flex;gap:8px;align-items:center">
+                        <div class="column-toggle-container">
+                            <button class="btn btn-outline btn-sm" id="pivotFilterFieldBtn">⚙️ Filter Fields</button>
+                            <div class="column-toggle-dropdown" id="pivotFilterFieldDropdown"></div>
+                        </div>
+                        <button class="btn btn-ghost btn-sm" id="pivotClearFilters">Clear All</button>
+                    </div>
+                </div>
+                <div class="filters-grid" id="pivotFilterGrid" style="margin-top:12px"></div>
+            </div>
+
+            <div class="pivot-controls">
+                <div class="pivot-header-row">
+                    <div class="pivot-title-input-group">
+                        <label>Report Title:</label>
+                        <input type="text" id="pivotTitle" class="pivot-title-input" placeholder="Enter your report title..." value="TTD Employee Pivot Report">
+                    </div>
+                    <div class="pivot-actions">
+                        <button class="btn btn-primary btn-sm" onclick="exportPivotExcel()">📥 Excel</button>
+                        <button class="btn btn-secondary btn-sm" onclick="exportPivotPDF()">📄 PDF (A4)</button>
+                    </div>
+                </div>
+                <div class="pivot-builder">
+                    <div class="pivot-field-bank" id="pivotFieldBank">
+                        <h4>📦 Available Fields <small>(drag to areas below)</small></h4>
+                        <div class="field-list" id="fieldList"></div>
+                    </div>
+                    <div class="pivot-drop-zones">
+                        <div class="drop-zone" id="dropRows">
+                            <h4>↕ Row Fields</h4>
+                            <div class="drop-area" data-zone="rows"></div>
+                        </div>
+                        <div class="drop-zone" id="dropCols">
+                            <h4>↔ Column Fields</h4>
+                            <div class="drop-area" data-zone="cols"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="pivot-options-bar">
+                    <div class="pivot-labels-group">
+                        <label>Row Label:</label>
+                        <input type="text" id="pivotRowLabel" class="label-input" placeholder="Row label...">
+                        <label>Column Label:</label>
+                        <input type="text" id="pivotColLabel" class="label-input" placeholder="Column label...">
+                        <label>Value Label:</label>
+                        <input type="text" id="pivotValueLabel" class="label-input" placeholder="Value label...">
+                    </div>
+                    <button class="btn btn-primary" id="btnGeneratePivot">Generate Pivot Table</button>
+                </div>
+            </div>
+            <div class="pivot-result-container">
+                <div class="pivot-table-wrapper" id="pivotTableWrapper">
+                    <div class="pivot-empty-state" id="pivotEmpty">
+                        <div class="empty-icon">📊</div>
+                        <h3>Drag fields to build your pivot table</h3>
+                        <p>Drop fields into Row and Column areas, then click Generate.</p>
+                    </div>
+                    <table class="pivot-table" id="pivotTable" style="display:none">
+                        <thead id="pivotTableHead"></thead>
+                        <tbody id="pivotTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="page-footer">&#169; Muddada Ravi Chandra IAS, EO, TTD</div>
+        </section>
+
+        <!-- ========== PAGE 4: PIVOT CHART ========== -->
+        <section id="page-pivotchart" class="page">
+            <div class="pivot-controls">
+                <div class="pivot-header-row">
+                    <div class="pivot-title-input-group">
+                        <label>Chart Title:</label>
+                        <input type="text" id="pivotChartTitle" class="pivot-title-input" placeholder="Enter chart title..." value="TTD Employee Analysis">
+                    </div>
+                    <div class="pivot-actions">
+                        <button class="btn btn-primary btn-sm" onclick="exportPivotChartImage('png')">📥 PNG</button>
+                        <button class="btn btn-secondary btn-sm" onclick="exportPivotChartImage('jpeg')">📥 JPEG</button>
+                        <button class="btn btn-secondary btn-sm" onclick="exportPivotChartPDF()">📄 PDF (A4)</button>
+                    </div>
+                </div>
+                <div class="chart-builder-row">
+                    <div class="chart-config-group">
+                        <label>Category (X-Axis)</label>
+                        <select id="pcCategory" class="filter-select"></select>
+                    </div>
+                    <div class="chart-config-group">
+                        <label>Series (Color Split)</label>
+                        <select id="pcSeries" class="filter-select">
+                            <option value="">None</option>
+                        </select>
+                    </div>
+                    <div class="chart-config-group">
+                        <label>X-Axis Label</label>
+                        <input type="text" id="pcXLabel" class="filter-input" placeholder="X axis label..." style="height:36px">
+                    </div>
+                    <div class="chart-config-group">
+                        <label>Y-Axis Label</label>
+                        <input type="text" id="pcYLabel" class="filter-input" placeholder="Y axis label..." style="height:36px">
+                    </div>
+                    <div class="chart-config-group">
+                        <label>Aggregation</label>
+                        <select id="pcAggregation" class="filter-select">
+                            <option value="count">Count</option>
+                            <option value="distinct">Distinct Count</option>
+                        </select>
+                    </div>
+                    <div class="chart-config-group">
+                        <label>Chart Type</label>
+                        <select id="pcChartType" class="filter-select">
+                            <option value="bar">Bar</option>
+                            <option value="horizontalBar">Horizontal Bar</option>
+                            <option value="pie">Pie</option>
+                            <option value="doughnut">Doughnut</option>
+                            <option value="line">Line</option>
+                            <option value="polarArea">Polar Area</option>
+                            <option value="radar">Radar</option>
+                            <option value="stackedBar">Stacked Bar</option>
+                            <option value="stackedHBar">Stacked Horiz. Bar</option>
+                        </select>
+                    </div>
+                    <div class="chart-config-group">
+                        <label>Top N</label>
+                        <select id="pcTopN" class="filter-select">
+                            <option value="5">Top 5</option>
+                            <option value="10" selected>Top 10</option>
+                            <option value="15">Top 15</option>
+                            <option value="20">Top 20</option>
+                            <option value="all">All</option>
+                        </select>
+                    </div>
+                    <div class="chart-config-group">
+                        <label>&nbsp;</label>
+                        <button class="btn btn-primary" id="btnGenerateChart">Generate Chart</button>
+                    </div>
+                </div>
+                <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px solid var(--border-color)">
+                    <span style="font-size:0.85rem;font-weight:600;color:var(--text-secondary)">🔍 Chart Filters:</span>
+                    <div class="column-toggle-container">
+                        <button class="btn btn-outline btn-sm" id="pcSelectFiltersBtn">⚙️ Select Filters</button>
+                        <div class="column-toggle-dropdown" id="pcSelectFiltersDropdown"></div>
+                    </div>
+                    <button class="btn btn-ghost btn-sm" id="pcClearFilters">Clear</button>
+                    <span style="font-size:0.85rem;font-weight:600;color:var(--text-secondary);margin-left:8px">🎨 Export Colors:</span>
+                    <label style="font-size:0.8rem;color:var(--text-muted);display:flex;align-items:center;gap:4px">
+                        Background <input type="color" id="pcBgColor" value="#fefce8" style="width:32px;height:24px;border:none;cursor:pointer;border-radius:4px;padding:1px">
+                    </label>
+                    <label style="font-size:0.8rem;color:var(--text-muted);display:flex;align-items:center;gap:4px">
+                        Chart Color <input type="color" id="pcChartColor" value="#2563eb" style="width:32px;height:24px;border:none;cursor:pointer;border-radius:4px;padding:1px">
+                    </label>
+                </div>
+                <div class="filters-grid" id="pcFiltersGrid" style="margin-top:8px"></div>
+            </div>
+            <div class="pivot-chart-container" id="pivotChartContainer">
+                <div class="pivot-empty-state" id="pivotChartEmpty">
+                    <div class="empty-icon">📈</div>
+                    <h3>Configure your chart above</h3>
+                    <p>Select a category, chart type, and click Generate.</p>
+                </div>
+                <canvas id="pivotChartCanvas" style="display:none"></canvas>
+            </div>
+            <div class="page-footer">&#169; Muddada Ravi Chandra IAS, EO, TTD</div>
+        </section>
+
+    <!-- Employee Detail Modal -->
+    <div class="emp-modal-overlay" id="empModalOverlay">
+        <div class="emp-modal">
+            <div class="emp-modal-header">
+                <h2 id="empModalTitle">Employee Details</h2>
+                <button class="emp-modal-close" id="empModalClose" title="Close">✕</button>
+            </div>
+            <div class="emp-modal-body" id="empModalBody"></div>
+        </div>
+    </div>
+    </main>
+
+    <!-- Mobile Overlay -->
+    <div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+    <script src="app.js"></script>
+</body>
+</html>
