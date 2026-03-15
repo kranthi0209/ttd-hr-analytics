@@ -79,6 +79,12 @@
     <!-- Main Content -->
     <main id="mainContent" class="main-content">
 
+        <!-- ========== GLOBAL EMPLOYEE TYPE FILTER BAR ========== -->
+        <div id="empTypeBar" class="emp-type-bar">
+            <span class="emp-type-bar-label">Employee Type:</span>
+            <div id="empTypeSwitches" class="emp-type-switches"></div>
+        </div>
+
         <!-- ========== PAGE 1: DASHBOARD ========== -->
         <section id="page-dashboard" class="page active">
             <!-- Filters Bar -->
@@ -161,6 +167,16 @@
                         <span class="kpi-label">Avg. Service (Yrs)</span>
                     </div>
                 </div>
+            </div>
+
+            <!-- Employee Type Strength Band -->
+            <div class="str-band" id="empTypeStrBand">
+                <div class="str-band-label">
+                    <span>🏛️</span>
+                    <span>Employee Type Strength</span>
+                </div>
+                <div class="str-band-divider"></div>
+                <div class="str-band-scroll" id="empTypeStrCards"></div>
             </div>
 
             <!-- Charts Grid -->
@@ -296,7 +312,19 @@
             <div class="filters-bar" id="pivotFiltersBar">
                 <div class="filters-header">
                     <h3>🔍 Filters</h3>
-                    <div style="display:flex;gap:8px;align-items:center">
+                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                        <!-- Post Status selector -->
+                        <div class="pivot-ps-group">
+                            <span class="pivot-ps-label">Post Status:</span>
+                            <label class="pivot-ps-chip">
+                                <input type="checkbox" id="ptPsOccupied" checked>
+                                <span class="pivot-ps-pill occupied">Occupied</span>
+                            </label>
+                            <label class="pivot-ps-chip">
+                                <input type="checkbox" id="ptPsVacant">
+                                <span class="pivot-ps-pill vacant">Vacant</span>
+                            </label>
+                        </div>
                         <div class="column-toggle-container">
                             <button class="btn btn-outline btn-sm" id="pivotFilterFieldBtn">⚙️ Filter Fields</button>
                             <div class="column-toggle-dropdown" id="pivotFilterFieldDropdown"></div>
@@ -313,8 +341,15 @@
                         <label>Report Title:</label>
                         <input type="text" id="pivotTitle" class="pivot-title-input" placeholder="Enter your report title..." value="TTD Employee Pivot Report">
                     </div>
-                    <div class="pivot-actions">
+                    <div class="pivot-actions" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
                         <button class="btn btn-primary btn-sm" onclick="exportPivotExcel()">📥 Excel</button>
+                        <label style="display:flex;align-items:center;gap:4px;font-size:0.78rem;color:var(--text-secondary)">
+                            Orientation
+                            <select id="ptPdfOrientation" style="height:28px;font-size:0.78rem;padding:2px 6px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-card);color:var(--text-primary)">
+                                <option value="landscape" selected>Landscape</option>
+                                <option value="portrait">Portrait</option>
+                            </select>
+                        </label>
                         <button class="btn btn-secondary btn-sm" onclick="exportPivotPDF()">📄 PDF (A4)</button>
                     </div>
                 </div>
@@ -345,18 +380,94 @@
                     </div>
                     <button class="btn btn-primary" id="btnGeneratePivot">Generate Pivot Table</button>
                 </div>
+                <!-- Pivot table style/format options -->
+                <div class="pivot-style-bar" style="display:flex;flex-wrap:wrap;align-items:center;gap:10px 18px;padding:10px 14px;background:var(--bg-secondary);border-radius:8px;border:1px solid var(--border-color);margin-top:10px;font-size:0.8rem;color:var(--text-secondary)">
+                    <span style="font-weight:700;color:var(--text-primary)">🎨 Table Style &amp; Format</span>
+                    <label style="display:flex;align-items:center;gap:5px">Col Header BG
+                        <input type="color" id="ptColHeaderColor" value="#7b1c00" style="width:30px;height:24px;border:none;cursor:pointer;border-radius:4px;padding:1px">
+                    </label>
+                    <label style="display:flex;align-items:center;gap:5px">Row Header BG
+                        <input type="color" id="ptRowHeaderColor" value="#fef3c7" style="width:30px;height:24px;border:none;cursor:pointer;border-radius:4px;padding:1px">
+                    </label>
+                    <label style="display:flex;align-items:center;gap:5px">Col Header Text
+                        <input type="color" id="ptColHeaderTextColor" value="#ffffff" style="width:30px;height:24px;border:none;cursor:pointer;border-radius:4px;padding:1px">
+                    </label>
+                    <label style="display:flex;align-items:center;gap:5px">Value Align
+                        <select id="ptValueAlign" class="filter-select" style="height:26px;font-size:0.78rem;padding:2px 6px">
+                            <option value="center" selected>Center</option>
+                            <option value="left">Left</option>
+                            <option value="right">Right</option>
+                        </select>
+                    </label>
+                    <label style="display:flex;align-items:center;gap:5px">Font Size
+                        <input type="number" id="ptFontSize" value="12" min="8" max="20" style="width:52px;height:26px;padding:2px 6px;border:1px solid var(--border-color);border-radius:4px;font-size:0.78rem">
+                    </label>
+                    <label style="display:flex;align-items:center;gap:5px">Font
+                        <select id="ptFont" class="filter-select" style="height:26px;font-size:0.78rem;padding:2px 6px">
+                            <option value="inherit" selected>Default</option>
+                            <option value="Arial">Arial</option>
+                            <option value="Times New Roman">Times New Roman</option>
+                            <option value="Georgia">Georgia</option>
+                            <option value="Courier New">Courier New</option>
+                            <option value="Verdana">Verdana</option>
+                        </select>
+                    </label>
+                    <label style="display:flex;align-items:center;gap:5px">Font Color
+                        <input type="color" id="ptFontColor" value="#1c1917" style="width:30px;height:24px;border:none;cursor:pointer;border-radius:4px;padding:1px">
+                    </label>
+                    <label style="display:flex;align-items:center;gap:5px">Title Size
+                        <input type="number" id="ptTitleFontSize" value="16" min="10" max="28" style="width:52px;height:26px;padding:2px 6px;border:1px solid var(--border-color);border-radius:4px;font-size:0.78rem">
+                    </label>
+                    <label style="display:flex;align-items:center;gap:5px">Title Font
+                        <select id="ptTitleFont" class="filter-select" style="height:26px;font-size:0.78rem;padding:2px 6px">
+                            <option value="inherit" selected>Default</option>
+                            <option value="Arial">Arial</option>
+                            <option value="Cinzel, serif">Cinzel</option>
+                            <option value="Georgia">Georgia</option>
+                            <option value="Times New Roman">Times New Roman</option>
+                        </select>
+                    </label>
+                    <label style="display:flex;align-items:center;gap:5px">Title Color
+                        <input type="color" id="ptTitleColor" value="#7b1c00" style="width:30px;height:24px;border:none;cursor:pointer;border-radius:4px;padding:1px">
+                    </label>
+                    <label style="display:flex;align-items:center;gap:5px">Show Values As
+                        <select id="ptValueMode" class="filter-select" style="height:26px;font-size:0.78rem;padding:2px 6px">
+                            <option value="count" selected>Count</option>
+                            <option value="pct_total">% of Grand Total</option>
+                            <option value="pct_row">% of Row Total</option>
+                            <option value="pct_col">% of Col Total</option>
+                            <option value="count_pct">Count + % Grand</option>
+                            <option value="count_pct_row">Count + % Row</option>
+                            <option value="count_pct_col">Count + % Col</option>
+                        </select>
+                    </label>
+                    <label style="display:flex;align-items:center;gap:5px">Header Align
+                        <select id="ptHeaderAlign" class="filter-select" style="height:26px;font-size:0.78rem;padding:2px 6px">
+                            <option value="left" selected>Left</option>
+                            <option value="center">Center</option>
+                            <option value="right">Right</option>
+                        </select>
+                    </label>
+                    <label style="display:flex;align-items:center;gap:5px">Header Angle
+                        <input type="number" id="ptHeaderAngle" value="0" min="0" max="90" style="width:52px;height:26px;padding:2px 6px;border:1px solid var(--border-color);border-radius:4px;font-size:0.78rem">
+                    </label>
+                </div>
             </div>
             <div class="pivot-result-container">
-                <div class="pivot-table-wrapper" id="pivotTableWrapper">
+                <!-- Title shown above table, styled by pivot title options -->
+                <div id="pivotReportTitle" style="display:none;text-align:center;padding:10px 0 4px;font-weight:700;font-size:16px;color:#7b1c00"></div>
+                <div class="pivot-table-wrapper" id="pivotTableWrapper" style="overflow-x:auto;width:100%;text-align:center">
                     <div class="pivot-empty-state" id="pivotEmpty">
                         <div class="empty-icon">📊</div>
                         <h3>Drag fields to build your pivot table</h3>
                         <p>Drop fields into Row and Column areas, then click Generate.</p>
                     </div>
-                    <table class="pivot-table" id="pivotTable" style="display:none">
-                        <thead id="pivotTableHead"></thead>
-                        <tbody id="pivotTableBody"></tbody>
-                    </table>
+                    <div id="pivotTableOuter" style="display:none">
+                        <table class="pivot-table" id="pivotTable" style="margin:0 auto">
+                            <thead id="pivotTableHead"></thead>
+                            <tbody id="pivotTableBody"></tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
             <div class="page-footer">&#169; Muddada Ravi Chandra IAS, EO, TTD</div>
@@ -438,12 +549,35 @@
                         <div class="column-toggle-dropdown" id="pcSelectFiltersDropdown"></div>
                     </div>
                     <button class="btn btn-ghost btn-sm" id="pcClearFilters">Clear</button>
-                    <span style="font-size:0.85rem;font-weight:600;color:var(--text-secondary);margin-left:8px">🎨 Export Colors:</span>
-                    <label style="font-size:0.8rem;color:var(--text-muted);display:flex;align-items:center;gap:4px">
-                        Background <input type="color" id="pcBgColor" value="#fefce8" style="width:32px;height:24px;border:none;cursor:pointer;border-radius:4px;padding:1px">
-                    </label>
+                    <span style="font-size:0.85rem;font-weight:600;color:var(--text-secondary);margin-left:8px">🎨 Chart Colors:</span>
                     <label style="font-size:0.8rem;color:var(--text-muted);display:flex;align-items:center;gap:4px">
                         Chart Color <input type="color" id="pcChartColor" value="#2563eb" style="width:32px;height:24px;border:none;cursor:pointer;border-radius:4px;padding:1px">
+                    </label>
+                    <label style="font-size:0.8rem;color:var(--text-muted);display:flex;align-items:center;gap:4px">
+                        Export BG <input type="color" id="pcBgColor" value="#fefce8" style="width:32px;height:24px;border:none;cursor:pointer;border-radius:4px;padding:1px">
+                    </label>
+                    <span style="font-size:0.85rem;font-weight:600;color:var(--text-secondary);margin-left:8px">🔤 Fonts:</span>
+                    <label style="font-size:0.8rem;color:var(--text-muted);display:flex;align-items:center;gap:4px">
+                        Title Size <input type="number" id="pcTitleFontSize" value="16" min="10" max="30" style="width:50px;height:24px;padding:2px 5px;border:1px solid var(--border-color);border-radius:4px;font-size:0.78rem">
+                    </label>
+                    <label style="font-size:0.8rem;color:var(--text-muted);display:flex;align-items:center;gap:4px">
+                        Title Font
+                        <select id="pcTitleFont" style="height:26px;font-size:0.78rem;padding:2px 5px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-card)">
+                            <option value="inherit" selected>Default</option>
+                            <option value="Arial">Arial</option>
+                            <option value="Cinzel, serif">Cinzel</option>
+                            <option value="Georgia">Georgia</option>
+                            <option value="Times New Roman">Times New Roman</option>
+                        </select>
+                    </label>
+                    <label style="font-size:0.8rem;color:var(--text-muted);display:flex;align-items:center;gap:4px">
+                        Title Color <input type="color" id="pcTitleColor" value="#1c1917" style="width:32px;height:24px;border:none;cursor:pointer;border-radius:4px;padding:1px">
+                    </label>
+                    <label style="font-size:0.8rem;color:var(--text-muted);display:flex;align-items:center;gap:4px">
+                        Label Size <input type="number" id="pcLabelFontSize" value="11" min="8" max="20" style="width:50px;height:24px;padding:2px 5px;border:1px solid var(--border-color);border-radius:4px;font-size:0.78rem">
+                    </label>
+                    <label style="font-size:0.8rem;color:var(--text-muted);display:flex;align-items:center;gap:4px">
+                        Label Color <input type="color" id="pcLabelColor" value="#6b3a00" style="width:32px;height:24px;border:none;cursor:pointer;border-radius:4px;padding:1px">
                     </label>
                 </div>
                 <div class="filters-grid" id="pcFiltersGrid" style="margin-top:8px"></div>

@@ -7,6 +7,7 @@ let RAW_DATA = [];
 let SERVICE_DATA = [];
 let FILTERED_DATA = [];
 let OCCUPIED_DATA = [];
+let ACTIVE_EMP_TYPES = new Set(); // filled after data loads; empty = no type filter yet
 
 let dashCharts = {};
 let pivotChartInstance = null;
@@ -23,6 +24,7 @@ const TABLE_COLUMNS = [
     { key: 'hod_name', label: 'Department (HOD)', show: true },
     { key: 'hos_name', label: 'Section Head', show: false },
     { key: 'section_name', label: 'Section', show: false },
+    { key: 'employee_type', label: 'Employee Type', show: true },
     { key: 'post_status', label: 'Post Status', show: true },
     { key: 'community', label: 'Community', show: true },
     { key: 'sub_community', label: 'Sub Community', show: false },
@@ -93,7 +95,7 @@ async function loadData() {
     try {
         msgEl.textContent = 'Loading employee records...';
         const [empRes, svcRes] = await Promise.all([
-            fetch('Regular_Employees.json'),
+            fetch('TTD_Employee_Full_List.json'),
             fetch('Regular_Employees_Service.json')
         ]);
         RAW_DATA = await empRes.json();
@@ -139,7 +141,9 @@ function processData() {
         r.service_years_current_post = r._presentPostSince ? parseFloat(yearsBetween(r._presentPostSince, now).toFixed(1)) : null;
         r.retirement_year = r._dor ? r._dor.getFullYear() : null;
 
-        r.is_occupied = r.post_status === 'occupied';
+        const _ps = String(r.post_status || '').toLowerCase().trim();
+        r.post_status = _ps;          // normalise in-place so filters match correctly
+        r.is_occupied = _ps === 'occupied';
         
         // fix work_location
         if (!r.work_location || r.work_location === 'None' || r.work_location === 'null') {
@@ -159,12 +163,176 @@ function processData() {
 // ── Initialize App ──
 function initApp() {
     setupNavigation();
+    initEmployeeTypeSwitches(); // must run before filters so ACTIVE_EMP_TYPES is populated
+    updateEmpTypeWidget();      // static widget — built from full RAW_DATA
     populateFilters();
     applyDashboardFilters();
     initDataTable();
     initPivotTable();
     initPivotChart();
     initEmployeeModal();
+}
+
+// ── Employee Type Strength Widget ──
+const ETW_ACCENTS = [
+    '#7b1c00', '#1565c0', '#2e7d32', '#c62828',
+    '#6a1b9a', '#e65100', '#00695c', '#ad1457',
+    '#4527a0', '#558b2f'
+];
+
+function updateEmpTypeWidget() {
+    const wrap = document.getElementById('empTypeStrCards');
+    if (!wrap) return;
+
+    const REGULAR_TYPE = 'Regular TTD Employees';
+    const R = 36, CIRC = +(2 * Math.PI * R).toFixed(2); // SVG ring constants
+
+    // Group full RAW_DATA by employee_type
+    const typeMap = {};
+    RAW_DATA.forEach(r => {
+        const t = r.employee_type || 'Unspecified';
+        if (!typeMap[t]) typeMap[t] = { sanctioned: 0, working: 0, vacant: 0 };
+        typeMap[t].sanctioned++;
+        if (r.post_status === 'occupied') typeMap[t].working++;
+        if (r.post_status === 'vacant')   typeMap[t].vacant++;
+    });
+
+    // Regular TTD first, then alphabetically
+    const types = Object.keys(typeMap).sort((a, b) => {
+        if (a === REGULAR_TYPE) return -1;
+        if (b === REGULAR_TYPE) return  1;
+        return a.localeCompare(b);
+    });
+
+    let html = '';
+    types.forEach((t, i) => {
+        const d        = typeMap[t];
+        const isReg    = t === REGULAR_TYPE;
+        const isActive = ACTIVE_EMP_TYPES.has(t);
+        const accent   = ETW_ACCENTS[i % ETW_ACCENTS.length];
+        const dimCls   = isActive ? '' : ' str-card-dim';
+
+        if (isReg) {
+            const pct     = d.sanctioned > 0 ? (d.working / d.sanctioned * 100) : 0;
+            const pctTxt  = pct.toFixed(1);
+            const filled  = +(CIRC * pct / 100).toFixed(2);
+            html += `
+            <div class="str-card str-featured${dimCls}" style="--sa:${accent}">
+                <div class="str-feat-gauge">
+                    <svg width="88" height="88" viewBox="0 0 88 88">
+                        <circle cx="44" cy="44" r="${R}" fill="none"
+                            stroke="rgba(200,134,10,0.15)" stroke-width="8"/>
+                        <circle cx="44" cy="44" r="${R}" fill="none"
+                            stroke="${accent}" stroke-width="8"
+                            stroke-linecap="round"
+                            stroke-dasharray="0 ${CIRC}"
+                            data-dash="${filled} ${CIRC}"
+                            transform="rotate(-90 44 44)"
+                            style="transition:stroke-dasharray 1.1s cubic-bezier(.4,0,.2,1)"/>
+                        <text x="44" y="41" text-anchor="middle"
+                            fill="${accent}" font-size="13" font-weight="700"
+                            font-family="JetBrains Mono,monospace">${pctTxt}%</text>
+                        <text x="44" y="54" text-anchor="middle"
+                            fill="#9a7150" font-size="7.5"
+                            font-family="sans-serif" letter-spacing="0.5">OCCUPANCY</text>
+                    </svg>
+                </div>
+                <div class="str-feat-info">
+                    <div class="str-feat-name">${t}</div>
+                    <div class="str-feat-stats">
+                        <div class="str-stat">
+                            <span class="str-num str-sanctioned">${formatNum(d.sanctioned)}</span>
+                            <span class="str-lbl">Sanctioned</span>
+                        </div>
+                        <div class="str-stat-sep"></div>
+                        <div class="str-stat">
+                            <span class="str-num str-working">${formatNum(d.working)}</span>
+                            <span class="str-lbl">Working</span>
+                        </div>
+                        <div class="str-stat-sep"></div>
+                        <div class="str-stat">
+                            <span class="str-num str-vacant">${formatNum(d.vacant)}</span>
+                            <span class="str-lbl">Vacant</span>
+                        </div>
+                    </div>
+                </div>
+            </div>`;
+        } else {
+            html += `
+            <div class="str-card str-compact${dimCls}" style="--sa:${accent}">
+                <div class="str-compact-dot"></div>
+                <div class="str-compact-name">${t}</div>
+                <div class="str-compact-num">${formatNum(d.working)}</div>
+                <div class="str-compact-lbl">Working</div>
+            </div>`;
+        }
+    });
+
+    wrap.innerHTML = html;
+
+    // Animate SVG rings after paint
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+        wrap.querySelectorAll('circle[data-dash]').forEach(el => {
+            el.setAttribute('stroke-dasharray', el.dataset.dash);
+        });
+    }));
+}
+
+// ── Employee Type Switches ──
+function initEmployeeTypeSwitches() {
+    const types = [...new Set(RAW_DATA.map(r => r.employee_type || 'Unknown').filter(Boolean))].sort();
+    const DEFAULT_ON = 'Regular TTD Employees';
+
+    ACTIVE_EMP_TYPES.clear();
+    // Default: turn on "Regular TTD Employees"; if not present fall back to first type
+    if (types.includes(DEFAULT_ON)) {
+        ACTIVE_EMP_TYPES.add(DEFAULT_ON);
+    } else if (types.length) {
+        ACTIVE_EMP_TYPES.add(types[0]);
+    }
+
+    const container = document.getElementById('empTypeSwitches');
+    if (!container) return;
+    container.innerHTML = '';
+
+    types.forEach(t => {
+        const isOn = ACTIVE_EMP_TYPES.has(t);
+        const label = document.createElement('label');
+        label.className = 'emp-type-item';
+        label.title = t;
+        label.innerHTML = `
+            <span class="emp-toggle ${isOn ? 'emp-on' : 'emp-off'}" data-etype="${t}"></span>
+            <span class="emp-type-name">${t}</span>`;
+        const tog = label.querySelector('.emp-toggle');
+        tog.addEventListener('click', e => {
+            e.preventDefault();
+            const etype = tog.dataset.etype;
+            if (ACTIVE_EMP_TYPES.has(etype)) {
+                ACTIVE_EMP_TYPES.delete(etype);
+                tog.classList.replace('emp-on', 'emp-off');
+            } else {
+                ACTIVE_EMP_TYPES.add(etype);
+                tog.classList.replace('emp-off', 'emp-on');
+            }
+            refreshAllViews();
+        });
+        container.appendChild(label);
+    });
+}
+
+function refreshAllViews() {
+    updateEmpTypeWidget();
+    applyDashboardFilters();
+    applyTableFilters();
+    // Re-generate pivot table if it has already been built
+    const pivotOuter = document.getElementById('pivotTableOuter');
+    if (pivotOuter && pivotOuter.style.display !== 'none') {
+        generatePivotTable();
+    }
+    // Re-generate pivot chart if it already exists
+    if (pivotChartInstance) {
+        generatePivotChart();
+    }
 }
 
 // ── Navigation ──
@@ -428,7 +596,7 @@ function renderDynamicFilterGrid(prefix, grid, onChange) {
         hasAny = true;
         const labelEl = document.querySelector(`#${dropdownId} input[value="${fk}"]`);
         const label = labelEl ? labelEl.closest('label').textContent.trim() : fk;
-        const vals = [...new Set(RAW_DATA.filter(r => r.is_occupied).map(r => String(r[fk] || '')).filter(v => v && v !== 'None' && v !== 'null'))].sort();
+        const vals = [...new Set(getEmpTypeData().filter(r => r.is_occupied).map(r => String(r[fk] || '')).filter(v => v && v !== 'None' && v !== 'null'))].sort();
 
         const group = document.createElement('div');
         group.className = 'filter-group';
@@ -553,6 +721,7 @@ const ALL_FILTER_FIELDS = [
     { key: 'present_post_by', label: 'Present Post Posted In' },
     { key: 'native_dist', label: 'Native District' },
     { key: 'local_dist_study', label: 'Local/Study District' },
+    { key: 'employee_type', label: 'Employee Type' },
     { key: 'post_status', label: 'Post Status' },
     { key: 'retirement_year', label: 'Retirement Year' },
     { key: 'section_name', label: 'Section' },
@@ -610,9 +779,16 @@ function initUnifiedFilters(prefix, btnId, dropdownId, gridId, defaultFields, on
     renderUnifiedFilterGrid(prefix, gridId, onChange);
 }
 
+// Returns RAW_DATA filtered by the active employee-type switches
+function getEmpTypeData() {
+    if (!ACTIVE_EMP_TYPES.size) return RAW_DATA;
+    return RAW_DATA.filter(r => ACTIVE_EMP_TYPES.has(r.employee_type || ''));
+}
+
 function getBaseData(prefix) {
-    if (prefix === 'dash' || prefix === 'pchart') return RAW_DATA.filter(r => r.is_occupied);
-    return RAW_DATA;
+    const base = getEmpTypeData();
+    if (prefix === 'dash' || prefix === 'pchart') return base.filter(r => r.is_occupied);
+    return base;
 }
 
 function getCascadedOptions(prefix, forField) {
@@ -834,51 +1010,77 @@ function clearUnifiedFilters(prefix, gridId, onChange) {
     if (onChange) onChange();
 }
 
-// Navigate to data table, copying all active dashboard filters + the clicked field/value
-function navigateToTableWithFilter(fieldKey, fieldValue) {
+// Navigate to data table, copying all active dashboard filters + the clicked field/value.
+// postStatusFilter: 'occupied' | 'vacant' | null (null = no occupancy restriction)
+// dateRange: { from: Date, to: Date } — when set, applies a date-range filter on fieldKey
+function navigateToTableWithFilter(fieldKey, fieldValue, postStatusFilter = 'occupied', dateRange = null) {
     const tableNav = document.querySelector('[data-page="datatable"]');
     if (tableNav) tableNav.click();
     if (!UNIFIED_FILTERS['table'] || !UNIFIED_FILTERS['dash']) return;
 
-    // Copy all active dashboard filter state into table filter state
+    // Clear ALL existing table filters so previous clicks don't linger
     ALL_FILTER_FIELDS.forEach(f => {
-        const dashState = UNIFIED_FILTERS['dash'][f.key];
-        const tableState = UNIFIED_FILTERS['table'][f.key];
-        if (!dashState || !tableState) return;
+        const s = UNIFIED_FILTERS['table'][f.key];
+        if (!s) return;
+        if (f.type === 'date') { s.from = null; s.to = null; s.enabled = false; }
+        else { s.selected = new Set(); s.enabled = false; }
+    });
+
+    // Copy active dashboard filters across
+    ALL_FILTER_FIELDS.forEach(f => {
+        const dS = UNIFIED_FILTERS['dash'][f.key];
+        const tS = UNIFIED_FILTERS['table'][f.key];
+        if (!dS || !tS) return;
         if (f.type === 'date') {
-            tableState.from = dashState.from;
-            tableState.to = dashState.to;
-            if (dashState.from || dashState.to) tableState.enabled = true;
+            tS.from = dS.from; tS.to = dS.to;
+            if (dS.from || dS.to) tS.enabled = true;
         } else {
-            if (dashState.selected && dashState.selected.size > 0) {
-                tableState.enabled = true;
-                tableState.selected = new Set(dashState.selected);
+            if (dS.selected && dS.selected.size > 0) {
+                tS.enabled = true; tS.selected = new Set(dS.selected);
             }
         }
     });
 
-    // Now apply the clicked chart filter on top
-    if (UNIFIED_FILTERS['table'][fieldKey]) {
+    // Apply the clicked chart value (categorical or date range)
+    if (fieldKey && UNIFIED_FILTERS['table'][fieldKey]) {
         UNIFIED_FILTERS['table'][fieldKey].enabled = true;
-        UNIFIED_FILTERS['table'][fieldKey].selected = new Set([String(fieldValue)]);
+        if (dateRange) {
+            UNIFIED_FILTERS['table'][fieldKey].from = dateRange.from;
+            UNIFIED_FILTERS['table'][fieldKey].to   = dateRange.to;
+        } else if (fieldValue !== null) {
+            UNIFIED_FILTERS['table'][fieldKey].selected = new Set([String(fieldValue)]);
+        }
     }
 
-    // Sync the dropdown checkboxes
+    // Apply occupancy filter (post_status)
+    if (postStatusFilter !== null && UNIFIED_FILTERS['table']['post_status']) {
+        UNIFIED_FILTERS['table']['post_status'].enabled = true;
+        UNIFIED_FILTERS['table']['post_status'].selected = new Set([postStatusFilter]);
+    }
+
+    // Sync select-filters dropdown checkboxes
     const dd = document.getElementById('tableSelectFiltersDropdown');
     if (dd) {
         ALL_FILTER_FIELDS.forEach(f => {
             const cb = dd.querySelector(`input[value="${f.key}"]`);
-            if (cb && UNIFIED_FILTERS['table'][f.key] && UNIFIED_FILTERS['table'][f.key].enabled) cb.checked = true;
+            if (cb) cb.checked = !!(UNIFIED_FILTERS['table'][f.key] && UNIFIED_FILTERS['table'][f.key].enabled);
         });
     }
 
     renderUnifiedFilterGrid('table', 'tableFiltersGrid', applyTableFilters);
     applyTableFilters();
+
+    // Scroll data table to top
+    setTimeout(() => {
+        const mainContent = document.querySelector('.main-content');
+        if (mainContent) mainContent.scrollTop = 0;
+        window.scrollTo(0, 0);
+    }, 120);
 }
 
 // ── Filter Logic ──
 function getFilteredOccupied(hods, comms, genders, locs, recruits, joineds, postedBys, svcMin, svcMax, extraFilters = {}) {
-    return RAW_DATA.filter(r => {
+    return getEmpTypeData().filter(r => {
         if (!r.is_occupied) return false;
         if (hods.length && !hods.includes(r.hod_name)) return false;
         if (comms.length && !comms.includes(r.community)) return false;
@@ -906,9 +1108,9 @@ function applyDashboardFilters() {
     const svcMin = parseInt(document.getElementById('fDashServiceMin').value) || 0;
     const svcMax = parseInt(document.getElementById('fDashServiceMax').value) || 40;
 
-    const filteredAll = RAW_DATA.filter(r => passesFilters(r, filters));
+    const filteredAll = getEmpTypeData().filter(r => passesFilters(r, filters));
 
-    OCCUPIED_DATA = RAW_DATA.filter(r => {
+    OCCUPIED_DATA = getEmpTypeData().filter(r => {
         if (!r.is_occupied) return false;
         if (!passesFilters(r, filters)) return false;
         if (r.service_years_current_post != null) {
@@ -922,20 +1124,21 @@ function applyDashboardFilters() {
 }
 
 function updateKPIs(allData, occupiedData) {
-    const total = allData.length;
-    const occupied = allData.filter(r => r.is_occupied).length;
-    const vacant = allData.filter(r => !r.is_occupied).length;
+    const total    = allData.length;
+    const occupied = allData.filter(r => r.post_status === 'occupied').length;
+    const vacant   = allData.filter(r => r.post_status === 'vacant').length;
     const depts = new Set(allData.map(r => r.hod_name)).size;
     const desigs = new Set(occupiedData.map(r => r.designation_name)).size;
     const avgSvc = occupiedData.length > 0
         ? (occupiedData.reduce((s, r) => s + (r.total_service_years || 0), 0) / occupiedData.length).toFixed(1)
         : 0;
 
-    const origTotal = RAW_DATA.length;
-    const origOccupied = RAW_DATA.filter(r => r.is_occupied).length;
-    const origVacant = RAW_DATA.filter(r => !r.is_occupied).length;
-    const origDepts = new Set(RAW_DATA.map(r => r.hod_name)).size;
-    const origOccupiedData = RAW_DATA.filter(r => r.is_occupied);
+    const _etd = getEmpTypeData();
+    const origTotal      = _etd.length;
+    const origOccupied   = _etd.filter(r => r.post_status === 'occupied').length;
+    const origVacant     = _etd.filter(r => r.post_status === 'vacant').length;
+    const origDepts      = new Set(_etd.map(r => r.hod_name)).size;
+    const origOccupiedData = _etd.filter(r => r.post_status === 'occupied');
     const origDesigs = new Set(origOccupiedData.map(r => r.designation_name)).size;
     const origAvgSvc = origOccupiedData.length > 0
         ? (origOccupiedData.reduce((s, r) => s + (r.total_service_years || 0), 0) / origOccupiedData.length).toFixed(1)
@@ -981,8 +1184,8 @@ function updateDashboardCharts(data, allData) {
     Object.values(dashCharts).forEach(c => c.destroy());
     dashCharts = {};
 
-    // 1. Department Strength (top 15 horizontal bar)
-    dashCharts.dept = createCountChart('chartDeptStrength', data, 'hod_name', 'bar', 15, true);
+    // 1. Department Strength (stacked horizontal bar — occupied vs vacant)
+    dashCharts.dept = createDeptStackedChart('chartDeptStrength', allData, 15);
 
     // 2. Community (doughnut)
     dashCharts.community = createCountChart('chartCommunity', data, 'community', 'doughnut');
@@ -996,7 +1199,7 @@ function updateDashboardCharts(data, allData) {
     // 5. Joined During (bar)
     dashCharts.joined = createCountChart('chartJoined', data, 'joined_during', 'bar');
 
-    // 6. Age Distribution (histogram)
+    // 6. Age Distribution (histogram — clickable)
     const ageBuckets = {};
     data.forEach(r => {
         if (r.age) {
@@ -1006,51 +1209,62 @@ function updateDashboardCharts(data, allData) {
         }
     });
     const ageSorted = Object.entries(ageBuckets).sort((a, b) => parseInt(a[0]) - parseInt(b[0]));
+    const ageLabels = ageSorted.map(e => e[0]);
+    const ageValues = ageSorted.map(e => e[1]);
+    const ageTotalCount = ageValues.reduce((a, b) => a + b, 0);
+    const ageNow = new Date();
     dashCharts.age = new Chart(document.getElementById('chartAge'), {
         type: 'bar',
         data: {
-            labels: ageSorted.map(e => e[0]),
-            datasets: [{
-                label: 'Employees',
-                data: ageSorted.map(e => e[1]),
-                backgroundColor: CHART_COLORS[0] + '99',
-                borderColor: CHART_COLORS[0],
-                borderWidth: 1,
-                borderRadius: 4
-            }]
+            labels: ageLabels,
+            datasets: [{ label: 'Employees', data: ageValues, backgroundColor: CHART_COLORS[0] + '99', borderColor: CHART_COLORS[0], borderWidth: 1, borderRadius: 4 }]
         },
-        options: chartOptions('Age Distribution')
+        options: {
+            ...chartOptions('Age Distribution'),
+            onClick: (_ev, els) => {
+                if (!els.length) return;
+                const lbl = ageLabels[els[0].index];
+                const parts = lbl.split('-');
+                const minAge = parseInt(parts[0]), maxAge = parseInt(parts[1]);
+                const toDate   = new Date(ageNow.getFullYear() - minAge, ageNow.getMonth(), ageNow.getDate());
+                const fromDate = new Date(ageNow.getFullYear() - maxAge - 1, ageNow.getMonth(), ageNow.getDate() + 1);
+                navigateToTableWithFilter('_dob', null, 'occupied', { from: fromDate, to: toDate });
+            },
+            plugins: { ...chartOptions('').plugins, tooltip: { ...chartOptions('').plugins.tooltip,
+                callbacks: { label: ctx => ` ${ctx.raw} (${ageTotalCount ? (ctx.raw/ageTotalCount*100).toFixed(1) : 0}%)`, footer: () => '🔍 Click to filter Data Table' }
+            }}
+        }
     });
 
-    // 7. Retirement Forecast
+    // 7. Retirement Forecast (clickable)
     const now = new Date();
     const retYears = {};
     for (let y = now.getFullYear(); y <= now.getFullYear() + 5; y++) retYears[y] = 0;
     data.forEach(r => {
-        if (r.retirement_year && retYears.hasOwnProperty(r.retirement_year)) {
-            retYears[r.retirement_year]++;
-        }
+        if (r.retirement_year && retYears.hasOwnProperty(r.retirement_year)) retYears[r.retirement_year]++;
     });
+    const retLabels = Object.keys(retYears);
+    const retValues = Object.values(retYears);
+    const retTotal = retValues.reduce((a, b) => a + b, 0);
     dashCharts.retirement = new Chart(document.getElementById('chartRetirement'), {
         type: 'bar',
-        data: {
-            labels: Object.keys(retYears),
-            datasets: [{
-                label: 'Retirements',
-                data: Object.values(retYears),
-                backgroundColor: CHART_COLORS[2] + '99',
-                borderColor: CHART_COLORS[2],
-                borderWidth: 1,
-                borderRadius: 4
-            }]
-        },
-        options: chartOptions('Retirement Forecast')
+        data: { labels: retLabels, datasets: [{ label: 'Retirements', data: retValues, backgroundColor: CHART_COLORS[2] + '99', borderColor: CHART_COLORS[2], borderWidth: 1, borderRadius: 4 }] },
+        options: {
+            ...chartOptions('Retirement Forecast'),
+            onClick: (_ev, els) => {
+                if (!els.length) return;
+                navigateToTableWithFilter('retirement_year', retLabels[els[0].index], 'occupied');
+            },
+            plugins: { ...chartOptions('').plugins, tooltip: { ...chartOptions('').plugins.tooltip,
+                callbacks: { label: ctx => ` ${ctx.raw} (${retTotal ? (ctx.raw/retTotal*100).toFixed(1) : 0}%)`, footer: () => '🔍 Click to filter Data Table' }
+            }}
+        }
     });
 
-    // 8. Top 15 Designations
-    dashCharts.designations = createCountChart('chartDesignations', data, 'designation_name', 'bar', 15, true);
+    // 8. Top 15 Designations (stacked: occupied vs vacant)
+    dashCharts.designations = createDeptStackedChart('chartDesignations', allData, 15, 'designation_name');
 
-    // 9. Posted During (Year posted to present post)
+    // 9. Posted During (Year posted to present post — clickable)
     const postedYearCounts = {};
     data.forEach(r => {
         if (r._presentPostSince) {
@@ -1058,25 +1272,94 @@ function updateDashboardCharts(data, allData) {
             postedYearCounts[yr] = (postedYearCounts[yr] || 0) + 1;
         }
     });
-    const postedYearEntries = Object.entries(postedYearCounts).sort((a,b) => a[0] - b[0]);
+    const postedYearEntries = Object.entries(postedYearCounts).sort((a, b) => a[0] - b[0]);
+    const postedLabels = postedYearEntries.map(e => e[0]);
+    const postedValues = postedYearEntries.map(e => e[1]);
+    const postedTotal = postedValues.reduce((a, b) => a + b, 0);
     dashCharts.postedDuring = new Chart(document.getElementById('chartPostedDuring'), {
         type: 'bar',
-        data: {
-            labels: postedYearEntries.map(e => e[0]),
-            datasets: [{
-                label: 'Employees Posted',
-                data: postedYearEntries.map(e => e[1]),
-                backgroundColor: CHART_COLORS[4] + '99',
-                borderColor: CHART_COLORS[4],
-                borderWidth: 1,
-                borderRadius: 4
-            }]
-        },
-        options: chartOptions('Posted During (Year)')
+        data: { labels: postedLabels, datasets: [{ label: 'Employees Posted', data: postedValues, backgroundColor: CHART_COLORS[4] + '99', borderColor: CHART_COLORS[4], borderWidth: 1, borderRadius: 4 }] },
+        options: {
+            ...chartOptions('Posted During (Year)'),
+            onClick: (_ev, els) => {
+                if (!els.length) return;
+                const year = parseInt(postedLabels[els[0].index]);
+                navigateToTableWithFilter('_presentPostSince', null, 'occupied', {
+                    from: new Date(year, 0, 1),
+                    to:   new Date(year, 11, 31, 23, 59, 59)
+                });
+            },
+            plugins: { ...chartOptions('').plugins, tooltip: { ...chartOptions('').plugins.tooltip,
+                callbacks: { label: ctx => ` ${ctx.raw} (${postedTotal ? (ctx.raw/postedTotal*100).toFixed(1) : 0}%)`, footer: () => '🔍 Click to filter Data Table' }
+            }}
+        }
     });
 
     // 10. Posted By
     dashCharts.postedBy = createCountChart('chartPostedBy', data, 'present_post_by', 'doughnut');
+}
+
+// field: the grouping field key (e.g. 'hod_name', 'designation_name')
+function createDeptStackedChart(canvasId, allData, topN = 15, field = 'hod_name') {
+    const grpMap = {};
+    allData.forEach(r => {
+        const d = r[field] || 'N/A';
+        if (!grpMap[d]) grpMap[d] = { occupied: 0, vacant: 0 };
+        if (r.is_occupied) grpMap[d].occupied++;
+        else grpMap[d].vacant++;
+    });
+
+    let entries = Object.entries(grpMap)
+        .map(([name, v]) => ({ name, occupied: v.occupied, vacant: v.vacant, total: v.occupied + v.vacant }))
+        .sort((a, b) => b.total - a.total);
+    if (topN) entries = entries.slice(0, topN);
+
+    const labels = entries.map(e => e.name);
+    const occupiedVals = entries.map(e => e.occupied);
+    const vacantVals = entries.map(e => e.vacant);
+    const totals = entries.map(e => e.total);
+    const base = chartOptions('');
+
+    return new Chart(document.getElementById(canvasId), {
+        type: 'bar',
+        data: {
+            labels,
+            datasets: [
+                { label: 'Occupied', data: occupiedVals, backgroundColor: '#2e7d32bb', borderColor: '#2e7d32', borderWidth: 1, borderRadius: 2 },
+                { label: 'Vacant',   data: vacantVals,   backgroundColor: '#c62828bb', borderColor: '#c62828', borderWidth: 1, borderRadius: 2 }
+            ]
+        },
+        options: {
+            ...base,
+            indexAxis: 'y',
+            scales: {
+                x: { stacked: true, ticks: { color: '#6b3a00', font: { size: 10 } }, grid: { color: '#e8b86d' } },
+                y: { stacked: true, ticks: { color: '#6b3a00', font: { size: 9 } }, grid: { color: '#e8b86d' } }
+            },
+            onClick: (_event, elements) => {
+                if (!elements.length) return;
+                const dsIdx = elements[0].datasetIndex; // 0=Occupied, 1=Vacant
+                const postFilter = dsIdx === 1 ? 'vacant' : 'occupied';
+                navigateToTableWithFilter(field, labels[elements[0].index], postFilter);
+            },
+            plugins: {
+                ...base.plugins,
+                legend: { display: true, position: 'top', labels: { color: '#6b3a00', font: { size: 11 } } },
+                tooltip: {
+                    ...base.plugins.tooltip,
+                    callbacks: {
+                        label: (ctx) => {
+                            const val = ctx.raw;
+                            const total = totals[ctx.dataIndex];
+                            const pct = total ? (val / total * 100).toFixed(1) : '0.0';
+                            return ` ${ctx.dataset.label}: ${val} (${pct}% of total)`;
+                        },
+                        footer: () => '🔍 Click to filter Data Table'
+                    }
+                }
+            }
+        }
+    });
 }
 
 function createCountChart(canvasId, data, field, type, topN = null, horizontal = false) {
@@ -1123,7 +1406,15 @@ function createCountChart(canvasId, data, field, type, topN = null, horizontal =
                 ...chartOptions('').plugins,
                 tooltip: {
                     ...chartOptions('').plugins.tooltip,
-                    callbacks: isFilterable ? { footer: () => '🔍 Click to filter Data Table' } : {}
+                    callbacks: {
+                        label: (ctx) => {
+                            const val = ctx.raw;
+                            const total = values.reduce((a, b) => a + b, 0);
+                            const pct = total ? (val / total * 100).toFixed(1) : '0.0';
+                            return ` ${val} (${pct}%)`;
+                        },
+                        ...(isFilterable ? { footer: () => '🔍 Click to filter Data Table' } : {})
+                    }
                 }
             }
         }
@@ -1227,7 +1518,7 @@ function applyTableFilters() {
     const svcMax = parseInt(document.getElementById('fTableServiceMax').value) || 40;
     const filters = getUnifiedFilterValues('table');
 
-    tableFilteredData = RAW_DATA.filter(r => {
+    tableFilteredData = getEmpTypeData().filter(r => {
         if (!passesFilters(r, filters)) return false;
         if (r.is_occupied && r.service_years_current_post != null) {
             if (r.service_years_current_post < svcMin || r.service_years_current_post > svcMax) return false;
@@ -1386,6 +1677,7 @@ const PIVOT_FIELDS = [
     { key: 'present_post_by', label: 'Present Post Posted In' },
     { key: 'native_dist', label: 'Native District' },
     { key: 'local_dist_study', label: 'Local/Study District' },
+    { key: 'employee_type', label: 'Employee Type' },
     { key: 'post_status', label: 'Post Status' },
     { key: 'retirement_year', label: 'Retirement Year' },
     { key: 'recruited_post', label: 'Recruited Post' }
@@ -1394,6 +1686,26 @@ const PIVOT_FIELDS = [
 const pivotState = { rows: [], cols: [] };
 const pivotFilterFields = {}; // key -> { label, enabled }
 const MULTISELECT_PIVOT_STATE = {};
+
+// Pivot expand/collapse state — key: compound path, false=collapsed, undefined=expanded
+let pivotExpandState = {};
+
+// Pivot column expand/collapse state — key: first-col-field-value, false=collapsed, undefined=expanded
+let pivotColExpandState = {};
+
+// Module-level storage for renderPivotBody() to use without re-reading DOM
+let _pvRowGroups = {};
+let _pvDisplayCols = [];
+let _pvRowFields = [];
+let _pvGrandTotals = {};
+let _pvGrandGrand = 0;
+let _pvStyles = {};
+let _pvValueMode = 'count';
+let _pvSortedRowKeys = [];
+let _pvVisibleCols = null;  // array of {key, isGroupTotal, subCols, cf1}
+let _pvColFields = [];       // column field keys
+let _pvHeaderAngle = 0;
+let _pvHeaderAlign = 'left';
 
 function initPivotTable() {
     const fieldList = document.getElementById('fieldList');
@@ -1472,7 +1784,7 @@ function renderPivotFilterGrid() {
         if (!pivotFilterFields[f.key] || !pivotFilterFields[f.key].enabled) return;
         hasAny = true;
         // Get unique values for this field
-        const vals = [...new Set(RAW_DATA.filter(r => r.is_occupied).map(r => String(r[f.key] || '')).filter(v => v && v !== 'None' && v !== 'null'))].sort();
+        const vals = [...new Set(getEmpTypeData().filter(r => r.is_occupied).map(r => String(r[f.key] || '')).filter(v => v && v !== 'None' && v !== 'null'))].sort();
         const group = document.createElement('div');
         group.className = 'filter-group';
         group.innerHTML = `<label>${f.label}</label>`;
@@ -1616,9 +1928,43 @@ function addFieldToZone(key, label, zoneName, zoneEl) {
 function generatePivotTable() {
     if (pivotState.rows.length === 0) { alert('Please add at least one Row field.'); return; }
 
-    const occupied = RAW_DATA.filter(r => r.is_occupied);
+    // Reset expand/collapse state on each fresh Generate
+    pivotExpandState = {};
+    pivotColExpandState = {};
+
+    // Read styling options
+    const colHeaderColor    = (document.getElementById('ptColHeaderColor')     || {}).value || '#7b1c00';
+    const rowHeaderColor    = (document.getElementById('ptRowHeaderColor')     || {}).value || '#fef3c7';
+    const colHeaderTextClr  = (document.getElementById('ptColHeaderTextColor') || {}).value || '#ffffff';
+    const valueAlign        = (document.getElementById('ptValueAlign')         || {}).value || 'center';
+    const fontSize          = (document.getElementById('ptFontSize')           || {}).value || '12';
+    const fontFamily        = (document.getElementById('ptFont')               || {}).value || 'inherit';
+    const fontColor         = (document.getElementById('ptFontColor')          || {}).value || '#1c1917';
+    const titleFontSize     = (document.getElementById('ptTitleFontSize')      || {}).value || '16';
+    const titleFont         = (document.getElementById('ptTitleFont')          || {}).value || 'inherit';
+    const titleColor        = (document.getElementById('ptTitleColor')         || {}).value || '#7b1c00';
+    const valueMode         = (document.getElementById('ptValueMode')          || {}).value || 'count';
+    const headerAlign       = (document.getElementById('ptHeaderAlign')        || {}).value || 'left';
+    const headerAngle       = parseInt((document.getElementById('ptHeaderAngle') || {}).value || '0', 10) || 0;
+
+    // Read Post Status checkboxes (default: Occupied only)
+    const ptPsOccupied = document.getElementById('ptPsOccupied');
+    const ptPsVacant   = document.getElementById('ptPsVacant');
+    const showOccupied = !ptPsOccupied || ptPsOccupied.checked;
+    const showVacant   = ptPsVacant && ptPsVacant.checked;
+    if (!showOccupied && !showVacant) {
+        alert('Please select at least one Post Status (Occupied / Vacant).');
+        return;
+    }
+
+    const baseData = getEmpTypeData().filter(r => {
+        if (r.post_status === 'occupied') return showOccupied;
+        if (r.post_status === 'vacant')   return showVacant;
+        return false;
+    });
+
     // Apply filters from filter bar
-    let data = occupied.filter(r => {
+    let data = baseData.filter(r => {
         for (const [fk, vals] of Object.entries(MULTISELECT_PIVOT_STATE)) {
             if (vals.size && !vals.has(String(r[fk] || ''))) return false;
         }
@@ -1656,63 +2002,564 @@ function generatePivotTable() {
     const sortedRowKeys = Object.keys(rowGroups).sort();
     const displayCols = colFields.length > 0 ? colValues : ['Total'];
 
-    // Build table
-    const table = document.getElementById('pivotTable');
-    const thead = document.getElementById('pivotTableHead');
-    const tbody = document.getElementById('pivotTableBody');
-
     const rowLabel = document.getElementById('pivotRowLabel').value || rowFields.map(f => PIVOT_FIELDS.find(pf => pf.key === f)?.label || f).join(' / ');
     const colLabel = document.getElementById('pivotColLabel').value || colFields.map(f => PIVOT_FIELDS.find(pf => pf.key === f)?.label || f).join(' × ');
     const valLabel = document.getElementById('pivotValueLabel').value || 'Count';
 
-    // Header
-    let headerHtml = '<tr>';
-    rowFields.forEach((f, i) => {
-        headerHtml += `<th>${rowLabel.split('/')[i] || PIVOT_FIELDS.find(pf => pf.key === f)?.label || f}</th>`;
-    });
-    displayCols.forEach(c => { headerHtml += `<th>${c}</th>`; });
-    headerHtml += '<th>Grand Total</th></tr>';
-    thead.innerHTML = headerHtml;
-
-    // Body
+    // Pre-compute grand total for percentage calculations
+    let grandGrand = 0;
     const grandTotals = {};
     displayCols.forEach(c => grandTotals[c] = 0);
-    let grandGrand = 0;
-
-    let bodyHtml = '';
     sortedRowKeys.forEach(rk => {
-        const parts = rk.split('|||');
-        let rowTotal = 0;
-        bodyHtml += '<tr>';
-        parts.forEach(p => { bodyHtml += `<td style="text-align:left; font-family:var(--font-main); font-weight:500">${p}</td>`; });
         displayCols.forEach(c => {
-            const val = rowGroups[rk][c] || 0;
-            rowTotal += val;
-            grandTotals[c] = (grandTotals[c] || 0) + val;
-            bodyHtml += `<td>${val}</td>`;
+            const v = rowGroups[rk][c] || 0;
+            grandTotals[c] = (grandTotals[c] || 0) + v;
+            grandGrand += v;
         });
-        grandGrand += rowTotal;
-        bodyHtml += `<td style="font-weight:700">${rowTotal}</td>`;
-        bodyHtml += '</tr>';
     });
 
-    // Grand total row
-    bodyHtml += '<tr>';
-    rowFields.forEach((f, i) => { bodyHtml += `<td style="text-align:left; font-weight:700">${i === 0 ? 'Grand Total' : ''}</td>`; });
-    displayCols.forEach(c => { bodyHtml += `<td>${grandTotals[c] || 0}</td>`; });
-    bodyHtml += `<td>${grandGrand}</td></tr>`;
+    // Apply table-level styling
+    const thStyle = `background:${colHeaderColor};color:${colHeaderTextClr};font-size:${fontSize}px;font-family:${fontFamily};text-align:${headerAlign};`;
+    const tdBaseStyle = `text-align:${valueAlign};font-size:${fontSize}px;font-family:${fontFamily};color:${fontColor};`;
+    const rowHdrStyle = `text-align:left;background:${rowHeaderColor};font-size:${fontSize}px;font-family:${fontFamily};color:${fontColor};font-weight:600;`;
+    const gtHdrStyle  = `background:${colHeaderColor};color:${colHeaderTextClr};font-size:${fontSize}px;font-family:${fontFamily};text-align:${headerAlign};`;
 
-    tbody.innerHTML = bodyHtml;
+    // Helper to render a header cell text (with angle support)
+    function thContent(text) {
+        if (headerAngle > 0) {
+            return `<span class="th-text" style="transform:rotate(-${headerAngle}deg)">${text}</span>`;
+        }
+        return text;
+    }
+    const angledClass = headerAngle > 0 ? ' class="angled"' : '';
+    // Estimate height for angled headers (rough: label length * sin(angle) * fontSize)
+    const angledHeightStyle = headerAngle > 0 ? `height:${Math.round(80 * Math.sin(headerAngle * Math.PI / 180) + 24)}px;` : '';
+
+    // Helper: escape a key for use inside onclick="...'"
+    function escGKgen(s) { return s.replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }
+
+    // Build visible columns structure (for col expand/collapse)
+    function buildVisibleCols(dCols, cFields) {
+        if (cFields.length <= 1) {
+            return dCols.map(c => ({ key: c, isGroupTotal: false, subCols: null, cf1: c }));
+        }
+        const cf1Groups = {};
+        dCols.forEach(ck => {
+            const cf1 = ck.split(' \u00D7 ')[0];
+            if (!cf1Groups[cf1]) cf1Groups[cf1] = [];
+            cf1Groups[cf1].push(ck);
+        });
+        const result = [];
+        Object.keys(cf1Groups).sort().forEach(cf1 => {
+            if (pivotColExpandState[cf1] === false) {
+                result.push({ key: cf1 + '__group', isGroupTotal: true, subCols: cf1Groups[cf1], cf1 });
+            } else {
+                cf1Groups[cf1].forEach(ck => result.push({ key: ck, isGroupTotal: false, subCols: null, cf1 }));
+            }
+        });
+        return result;
+    }
+
+    // Build thead HTML (handles single-row and two-row header)
+    function buildColHeaderHtml(rFields, visCols, dCols, cFields) {
+        if (cFields.length <= 1) {
+            // Single-row header
+            let hHtml = `<tr style="${thStyle}">`;
+            // Row field headers — NO angle
+            rFields.forEach((f, i) => {
+                const label = rowLabel.split('/')[i]?.trim() || PIVOT_FIELDS.find(pf => pf.key === f)?.label || f;
+                hHtml += `<th style="${rowHdrStyle}text-align:left;">${label}</th>`;
+            });
+            // Value column headers — YES angle
+            visCols.forEach(vc => {
+                const lbl = vc.isGroupTotal ? ('Total: ' + vc.cf1) : vc.key;
+                hHtml += `<th${angledClass} style="${thStyle}${angledHeightStyle}">${thContent(lbl)}</th>`;
+            });
+            // Grand Total — YES angle
+            hHtml += `<th${angledClass} style="${gtHdrStyle}${angledHeightStyle}">${thContent('Grand Total')}</th></tr>`;
+            return hHtml;
+        }
+
+        // Two-row header for multiple column fields
+        const cf1Groups = {};
+        dCols.forEach(ck => {
+            const cf1 = ck.split(' \u00D7 ')[0];
+            if (!cf1Groups[cf1]) cf1Groups[cf1] = [];
+            cf1Groups[cf1].push(ck);
+        });
+
+        let row1 = `<tr style="${thStyle}">`;
+        // Row field spacer cells (rowspan=2) — NO angle
+        rFields.forEach((f, i) => {
+            const label = rowLabel.split('/')[i]?.trim() || PIVOT_FIELDS.find(pf => pf.key === f)?.label || f;
+            row1 += `<th rowspan="2" style="${rowHdrStyle}text-align:left;">${label}</th>`;
+        });
+        // CF1 group cells — YES angle, clickable
+        Object.keys(cf1Groups).sort().forEach(cf1 => {
+            const isCollapsed = pivotColExpandState[cf1] === false;
+            const colSpan = isCollapsed ? 1 : cf1Groups[cf1].length;
+            const icon = isCollapsed ? '&#9658;' : '&#9660;';
+            row1 += `<th colspan="${colSpan}"${angledClass} style="${thStyle}${angledHeightStyle}cursor:pointer;" onclick="togglePivotColGroup('${escGKgen(cf1)}')">${thContent(icon + ' ' + cf1)}</th>`;
+        });
+        // Grand Total (rowspan=2) — YES angle
+        row1 += `<th rowspan="2"${angledClass} style="${gtHdrStyle}${angledHeightStyle}">${thContent('Grand Total')}</th>`;
+        row1 += '</tr>';
+
+        let row2 = `<tr style="${thStyle}">`;
+        visCols.forEach(vc => {
+            if (vc.isGroupTotal) {
+                row2 += `<th${angledClass} style="${thStyle}${angledHeightStyle}">${thContent('Total')}</th>`;
+            } else {
+                const subLabel = vc.key.split(' \u00D7 ').slice(1).join(' \u00D7 ');
+                row2 += `<th${angledClass} style="${thStyle}${angledHeightStyle}">${thContent(subLabel)}</th>`;
+            }
+        });
+        row2 += '</tr>';
+
+        return row1 + row2;
+    }
+
+    // Compute visible cols
+    const visibleCols = buildVisibleCols(displayCols, colFields);
+
+    // Build table
+    const table = document.getElementById('pivotTable');
+    const thead = document.getElementById('pivotTableHead');
+
+    // Build and set header HTML
+    thead.innerHTML = buildColHeaderHtml(rowFields, visibleCols, displayCols, colFields);
 
     // Add sort to pivot table headers
     thead.querySelectorAll('th').forEach((th, idx) => {
-        th.addEventListener('click', () => {
-            sortPivotTable(idx, th);
+        th.addEventListener('click', () => { sortPivotTable(idx, th); });
+    });
+
+    // Save to module-level vars for renderPivotBody
+    _pvRowGroups     = rowGroups;
+    _pvDisplayCols   = displayCols;
+    _pvRowFields     = rowFields;
+    _pvGrandTotals   = grandTotals;
+    _pvGrandGrand    = grandGrand;
+    _pvSortedRowKeys = sortedRowKeys;
+    _pvValueMode     = valueMode;
+    _pvStyles        = { thStyle, tdBaseStyle, rowHdrStyle, gtHdrStyle, colHeaderColor, rowHeaderColor, colHeaderTextClr, fontSize, fontFamily, fontColor };
+    _pvVisibleCols   = visibleCols;
+    _pvColFields     = colFields;
+    _pvHeaderAngle   = headerAngle;
+    _pvHeaderAlign   = headerAlign;
+
+    // Render tbody
+    renderPivotBody();
+
+    // Apply table-level font / sizing and auto-centre
+    table.style.cssText = `display:table;margin:0 auto;font-size:${fontSize}px;font-family:${fontFamily};color:${fontColor};border-collapse:collapse;`;
+
+    // Show outer wrapper
+    const outerEl = document.getElementById('pivotTableOuter');
+    if (outerEl) outerEl.style.display = 'inline-block';
+
+    // Update report title display above the table
+    const titleEl = document.getElementById('pivotReportTitle');
+    if (titleEl) {
+        const titleText = document.getElementById('pivotTitle').value || 'Pivot Report';
+        titleEl.textContent = titleText;
+        titleEl.style.cssText = `display:block;text-align:center;padding:10px 0 4px;font-weight:700;font-size:${titleFontSize}px;font-family:${titleFont};color:${titleColor};`;
+    }
+
+    document.getElementById('pivotEmpty').style.display = 'none';
+
+    // Initialise drag-resize handles
+    initPivotTableResize();
+}
+
+function renderPivotBody() {
+    const tbody = document.getElementById('pivotTableBody');
+    const rowGroups     = _pvRowGroups;
+    const displayCols   = _pvDisplayCols;
+    const rowFields     = _pvRowFields;
+    const grandTotals   = _pvGrandTotals;
+    const grandGrand    = _pvGrandGrand;
+    const sortedRowKeys = _pvSortedRowKeys;
+    const valueMode     = _pvValueMode;
+    const visibleCols   = _pvVisibleCols || displayCols.map(c => ({ key: c, isGroupTotal: false, subCols: null, cf1: c }));
+    const { tdBaseStyle, rowHdrStyle, rowHeaderColor } = _pvStyles;
+
+    // Format a cell value according to chosen mode
+    function fmtCell(val, rowTotal, colTotal) {
+        const gt = grandGrand || 1;
+        switch (valueMode) {
+            case 'pct_total':     return `${(val / gt * 100).toFixed(1)}%`;
+            case 'pct_row':       return `${rowTotal ? (val / rowTotal * 100).toFixed(1) : 0}%`;
+            case 'pct_col':       return `${colTotal ? (val / colTotal * 100).toFixed(1) : 0}%`;
+            case 'count_pct':     return `${val} (${(val / gt * 100).toFixed(1)}%)`;
+            case 'count_pct_row': return `${val} (${rowTotal ? (val / rowTotal * 100).toFixed(1) : 0}%)`;
+            case 'count_pct_col': return `${val} (${colTotal ? (val / colTotal * 100).toFixed(1) : 0}%)`;
+            default:              return val;
+        }
+    }
+
+    // Format row total cell
+    function fmtRowTotal(rt) {
+        if (valueMode === 'count') return rt;
+        if (valueMode === 'pct_total') return `${(rt / (grandGrand || 1) * 100).toFixed(1)}%`;
+        if (valueMode === 'pct_row') return '100%';
+        return rt;
+    }
+
+    // Escape a group key for use inside onclick="...'"
+    function escGK(s) { return s.replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }
+
+    // Aggregate all rowKeys' visible col values; also compute _total from all displayCols
+    function aggregate(rowKeys) {
+        const agg = {};
+        displayCols.forEach(c => { agg[c] = 0; });
+        rowKeys.forEach(rk => displayCols.forEach(c => { agg[c] += rowGroups[rk][c] || 0; }));
+        agg._total = displayCols.reduce((s, c) => s + agg[c], 0);
+        return agg;
+    }
+
+    // Build data cells HTML for aggregated values; extraStyle is appended to each td style
+    function dataCells(agg, rowTotal, extraStyle) {
+        extraStyle = extraStyle || '';
+        let h = '';
+        visibleCols.forEach(vc => {
+            let val = 0;
+            if (vc.isGroupTotal) {
+                val = (vc.subCols || []).reduce((s, k) => s + (agg[k] || 0), 0);
+            } else {
+                val = agg[vc.key] || 0;
+            }
+            const colTotal = vc.isGroupTotal
+                ? (vc.subCols || []).reduce((s, k) => s + (grandTotals[k] || 0), 0)
+                : (grandTotals[vc.key] || 0);
+            h += `<td style="${tdBaseStyle}${extraStyle}">${fmtCell(val, rowTotal, colTotal)}</td>`;
+        });
+        h += `<td style="${tdBaseStyle}font-weight:700;${extraStyle}">${fmtRowTotal(rowTotal)}</td>`;
+        return h;
+    }
+
+    // Recursive multi-level row group rendering
+    // level 0..rowFields.length-2 are non-leaf (group with expand/collapse + subtotal)
+    // level rowFields.length-1 is leaf (one row per rowKey, no expand/collapse)
+    function renderGroup(rowKeys, level, path) {
+        const rows = [];
+
+        if (level === rowFields.length - 1) {
+            // Leaf level: one data row per rowKey
+            rowKeys.slice().sort().forEach(rk => {
+                const parts = rk.split('|||');
+                const leafVal = parts[level];
+                const agg = aggregate([rk]);
+                let cells = `<td style="${rowHdrStyle}">${leafVal}</td>`;
+                cells += dataCells(agg, agg._total, '');
+                rows.push(`<tr>${cells}</tr>`);
+            });
+            return rows;
+        }
+
+        // Non-leaf: group by value at this level
+        const groups = {};
+        rowKeys.forEach(rk => {
+            const key = rk.split('|||')[level];
+            if (!groups[key]) groups[key] = [];
+            groups[key].push(rk);
+        });
+
+        Object.keys(groups).sort().forEach(key => {
+            const gRowKeys = groups[key];
+            const expandKey = [...path, key].join('|||');
+            const isCollapsed = pivotExpandState[expandKey] === false;
+            const agg = aggregate(gRowKeys);
+            const indent = '\u00a0'.repeat(level * 3);
+
+            if (isCollapsed) {
+                // One summary row spanning remaining row field columns
+                const colspan = rowFields.length - level;
+                let cells = `<td colspan="${colspan}" style="${rowHdrStyle}cursor:pointer;user-select:none;" onclick="togglePivotGroup('${escGK(expandKey)}')">${indent}&#9658; ${key}</td>`;
+                cells += dataCells(agg, agg._total, '');
+                rows.push(`<tr>${cells}</tr>`);
+            } else {
+                // Expanded: get child rows recursively
+                const childRows = renderGroup(gRowKeys, level + 1, [...path, key]);
+
+                // Total rows this group spans = childRows + 1 subtotal row
+                const totalSpan = childRows.length + 1;
+
+                // Group header cell with rowspan injected into first child row
+                const groupCell = `<td rowspan="${totalSpan}" style="${rowHdrStyle}vertical-align:middle;cursor:pointer;user-select:none;" onclick="togglePivotGroup('${escGK(expandKey)}')">${indent}&#9660; ${key}</td>`;
+
+                if (childRows.length > 0) {
+                    childRows[0] = childRows[0].replace(/^<tr>/, '<tr>' + groupCell);
+                }
+                rows.push(...childRows);
+
+                // Subtotal row: colspan covers from level+1 to rowFields.length-1
+                const subColspan = rowFields.length - level - 1;
+                let stCells = '';
+                if (subColspan > 0) {
+                    stCells += `<td colspan="${subColspan}" style="${rowHdrStyle}font-style:italic;font-weight:700;">${indent}\u00a0\u00a0Subtotal: ${key}</td>`;
+                } else {
+                    stCells += `<td style="${rowHdrStyle}font-style:italic;font-weight:700;">${indent}\u00a0\u00a0Subtotal: ${key}</td>`;
+                }
+                stCells += dataCells(agg, agg._total, 'font-style:italic;');
+                rows.push(`<tr style="background:rgba(200,134,10,0.13)">${stCells}</tr>`);
+            }
+        });
+
+        return rows;
+    }
+
+    let bodyHtml = '';
+
+    if (rowFields.length <= 1) {
+        // Single row field: flat rendering (no grouping, no expand/collapse)
+        sortedRowKeys.forEach(rk => {
+            const parts = rk.split('|||');
+            const agg = aggregate([rk]);
+            let cells = `<td style="${rowHdrStyle}">${parts[0] || ''}</td>`;
+            cells += dataCells(agg, agg._total, '');
+            bodyHtml += `<tr>${cells}</tr>`;
+        });
+    } else {
+        // Multi-level: recursive rendering
+        const topLevelRows = renderGroup(sortedRowKeys, 0, []);
+        bodyHtml = topLevelRows.join('');
+    }
+
+    // Grand total row — "Grand Total" spans all row field columns
+    let gtRow = `<tr style="background:${rowHeaderColor}">`;
+    gtRow += `<td colspan="${rowFields.length}" style="${rowHdrStyle}font-weight:800;">Grand Total</td>`;
+    // For grand total data cells, use full displayCols grand totals
+    visibleCols.forEach(vc => {
+        let val = 0;
+        if (vc.isGroupTotal) {
+            val = (vc.subCols || []).reduce((s, k) => s + (grandTotals[k] || 0), 0);
+        } else {
+            val = grandTotals[vc.key] || 0;
+        }
+        const colTotal = vc.isGroupTotal
+            ? (vc.subCols || []).reduce((s, k) => s + (grandTotals[k] || 0), 0)
+            : (grandTotals[vc.key] || 0);
+        gtRow += `<td style="${tdBaseStyle}font-weight:700;">${fmtCell(val, grandGrand, colTotal)}</td>`;
+    });
+    gtRow += `<td style="${tdBaseStyle}font-weight:800;">${valueMode === 'count' ? grandGrand : '100%'}</td>`;
+    gtRow += '</tr>';
+    bodyHtml += gtRow;
+
+    tbody.innerHTML = bodyHtml;
+}
+
+window.togglePivotGroup = function(groupKey) {
+    // undefined or true = expanded → collapse
+    // false = collapsed → expand (delete key)
+    if (pivotExpandState[groupKey] === false) {
+        delete pivotExpandState[groupKey];
+    } else {
+        pivotExpandState[groupKey] = false;
+    }
+    renderPivotBody();
+    initPivotTableResize();
+};
+
+window.togglePivotColGroup = function(cf1Key) {
+    if (pivotColExpandState[cf1Key] === false) {
+        delete pivotColExpandState[cf1Key];
+    } else {
+        pivotColExpandState[cf1Key] = false;
+    }
+    rebuildPivotColHeader();
+    renderPivotBody();
+    initPivotTableResize();
+};
+
+function rebuildPivotColHeader() {
+    const thead = document.getElementById('pivotTableHead');
+    if (!thead) return;
+
+    const colHeaderColor   = _pvStyles.colHeaderColor   || '#7b1c00';
+    const colHeaderTextClr = _pvStyles.colHeaderTextClr || '#ffffff';
+    const rowHeaderColor   = _pvStyles.rowHeaderColor   || '#fef3c7';
+    const fontSize         = _pvStyles.fontSize         || '12';
+    const fontFamily       = _pvStyles.fontFamily       || 'inherit';
+    const fontColor        = _pvStyles.fontColor        || '#1c1917';
+    const headerAngle      = _pvHeaderAngle;
+    const headerAlign      = _pvHeaderAlign;
+
+    const thStyle    = `background:${colHeaderColor};color:${colHeaderTextClr};font-size:${fontSize}px;font-family:${fontFamily};text-align:${headerAlign};`;
+    const rowHdrStyle = `text-align:left;background:${rowHeaderColor};font-size:${fontSize}px;font-family:${fontFamily};color:${fontColor};font-weight:600;`;
+    const gtHdrStyle  = `background:${colHeaderColor};color:${colHeaderTextClr};font-size:${fontSize}px;font-family:${fontFamily};text-align:${headerAlign};`;
+
+    function thContent(text) {
+        if (headerAngle > 0) {
+            return `<span class="th-text" style="transform:rotate(-${headerAngle}deg)">${text}</span>`;
+        }
+        return text;
+    }
+    const angledClass = headerAngle > 0 ? ' class="angled"' : '';
+    const angledHeightStyle = headerAngle > 0 ? `height:${Math.round(80 * Math.sin(headerAngle * Math.PI / 180) + 24)}px;` : '';
+
+    function escGK(s) { return s.replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }
+
+    const rowLabel = document.getElementById('pivotRowLabel').value ||
+        _pvRowFields.map(f => PIVOT_FIELDS.find(pf => pf.key === f)?.label || f).join(' / ');
+
+    const displayCols = _pvDisplayCols;
+    const colFields   = _pvColFields;
+    const rowFields   = _pvRowFields;
+
+    // Rebuild visibleCols
+    if (colFields.length > 1) {
+        const cf1Groups = {};
+        displayCols.forEach(ck => {
+            const cf1 = ck.split(' \u00D7 ')[0];
+            if (!cf1Groups[cf1]) cf1Groups[cf1] = [];
+            cf1Groups[cf1].push(ck);
+        });
+        const result = [];
+        Object.keys(cf1Groups).sort().forEach(cf1 => {
+            if (pivotColExpandState[cf1] === false) {
+                result.push({ key: cf1 + '__group', isGroupTotal: true, subCols: cf1Groups[cf1], cf1 });
+            } else {
+                cf1Groups[cf1].forEach(ck => result.push({ key: ck, isGroupTotal: false, subCols: null, cf1 }));
+            }
+        });
+        _pvVisibleCols = result;
+    } else {
+        _pvVisibleCols = displayCols.map(c => ({ key: c, isGroupTotal: false, subCols: null, cf1: c }));
+    }
+
+    // Build header HTML
+    let headerHtml = '';
+
+    if (colFields.length <= 1) {
+        headerHtml = `<tr style="${thStyle}">`;
+        rowFields.forEach((f, i) => {
+            const label = rowLabel.split('/')[i]?.trim() || PIVOT_FIELDS.find(pf => pf.key === f)?.label || f;
+            headerHtml += `<th style="${rowHdrStyle}text-align:left;">${label}</th>`;
+        });
+        _pvVisibleCols.forEach(vc => {
+            const lbl = vc.isGroupTotal ? ('Total: ' + vc.cf1) : vc.key;
+            headerHtml += `<th${angledClass} style="${thStyle}${angledHeightStyle}">${thContent(lbl)}</th>`;
+        });
+        headerHtml += `<th${angledClass} style="${gtHdrStyle}${angledHeightStyle}">${thContent('Grand Total')}</th></tr>`;
+    } else {
+        const cf1Groups = {};
+        displayCols.forEach(ck => {
+            const cf1 = ck.split(' \u00D7 ')[0];
+            if (!cf1Groups[cf1]) cf1Groups[cf1] = [];
+            cf1Groups[cf1].push(ck);
+        });
+
+        let row1 = `<tr style="${thStyle}">`;
+        rowFields.forEach((f, i) => {
+            const label = rowLabel.split('/')[i]?.trim() || PIVOT_FIELDS.find(pf => pf.key === f)?.label || f;
+            row1 += `<th rowspan="2" style="${rowHdrStyle}text-align:left;">${label}</th>`;
+        });
+        Object.keys(cf1Groups).sort().forEach(cf1 => {
+            const isCollapsed = pivotColExpandState[cf1] === false;
+            const colSpan = isCollapsed ? 1 : cf1Groups[cf1].length;
+            const icon = isCollapsed ? '&#9658;' : '&#9660;';
+            row1 += `<th colspan="${colSpan}"${angledClass} style="${thStyle}${angledHeightStyle}cursor:pointer;" onclick="togglePivotColGroup('${escGK(cf1)}')">${thContent(icon + ' ' + cf1)}</th>`;
+        });
+        row1 += `<th rowspan="2"${angledClass} style="${gtHdrStyle}${angledHeightStyle}">${thContent('Grand Total')}</th>`;
+        row1 += '</tr>';
+
+        let row2 = `<tr style="${thStyle}">`;
+        _pvVisibleCols.forEach(vc => {
+            if (vc.isGroupTotal) {
+                row2 += `<th${angledClass} style="${thStyle}${angledHeightStyle}">${thContent('Total')}</th>`;
+            } else {
+                const subLabel = vc.key.split(' \u00D7 ').slice(1).join(' \u00D7 ');
+                row2 += `<th${angledClass} style="${thStyle}${angledHeightStyle}">${thContent(subLabel)}</th>`;
+            }
+        });
+        row2 += '</tr>';
+        headerHtml = row1 + row2;
+    }
+
+    thead.innerHTML = headerHtml;
+    thead.querySelectorAll('th').forEach((th, idx) => {
+        th.addEventListener('click', () => sortPivotTable(idx, th));
+    });
+}
+
+function initPivotTableResize() {
+    const table = document.getElementById('pivotTable');
+    if (!table) return;
+
+    // --- Column resize handles ---
+    table.querySelectorAll('thead th').forEach(th => {
+        // Remove any existing resizer to avoid duplicates
+        const existing = th.querySelector('.col-resizer');
+        if (existing) existing.remove();
+
+        const resizer = document.createElement('div');
+        resizer.className = 'col-resizer';
+        th.appendChild(resizer);
+
+        let startX = 0;
+        let startW = 0;
+
+        resizer.addEventListener('mousedown', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            startX = e.clientX;
+            startW = th.offsetWidth;
+
+            function onMouseMove(ev) {
+                const newW = Math.max(40, startW + ev.clientX - startX);
+                th.style.width = newW + 'px';
+                th.style.minWidth = newW + 'px';
+                th.style.whiteSpace = 'normal';
+                th.style.wordBreak = 'break-word';
+            }
+            function onMouseUp() {
+                document.removeEventListener('mousemove', onMouseMove);
+                document.removeEventListener('mouseup', onMouseUp);
+            }
+            document.addEventListener('mousemove', onMouseMove);
+            document.addEventListener('mouseup', onMouseUp);
         });
     });
 
-    document.getElementById('pivotEmpty').style.display = 'none';
-    table.style.display = 'table';
+    // --- Row resize handles (last td of each tbody tr) ---
+    table.querySelectorAll('tbody tr').forEach(tr => {
+        const cells = tr.cells;
+        if (!cells.length) return;
+        const lastTd = cells[cells.length - 1];
+
+        // Remove existing resizer
+        const existing = lastTd.querySelector('.row-resizer');
+        if (existing) existing.remove();
+
+        // Need position:relative on the cell
+        lastTd.style.position = 'relative';
+
+        const resizer = document.createElement('div');
+        resizer.className = 'row-resizer';
+        lastTd.appendChild(resizer);
+
+        let startY = 0;
+        let startH = 0;
+
+        resizer.addEventListener('mousedown', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            startY = e.clientY;
+            startH = tr.offsetHeight;
+
+            function onMouseMove(ev) {
+                const newH = Math.max(20, startH + ev.clientY - startY);
+                tr.style.height = newH + 'px';
+            }
+            function onMouseUp() {
+                document.removeEventListener('mousemove', onMouseMove);
+                document.removeEventListener('mouseup', onMouseUp);
+            }
+            document.addEventListener('mousemove', onMouseMove);
+            document.addEventListener('mouseup', onMouseUp);
+        });
+    });
 }
 
 function sortPivotTable(colIdx, thEl) {
@@ -1749,39 +2596,171 @@ function exportPivotExcel() {
     XLSX.writeFile(wb, title.replace(/[^a-zA-Z0-9]/g, '_') + '.xlsx');
 }
 
-function exportPivotPDF() {
+// Crop a portion of a canvas vertically: from startY, height = heightPx
+function _cropCanvas(src, startY, heightPx) {
+    heightPx = Math.max(1, Math.round(heightPx));
+    const out = document.createElement('canvas');
+    out.width  = src.width;
+    out.height = heightPx;
+    out.getContext('2d').drawImage(src,
+        0, Math.round(startY), src.width, heightPx,
+        0, 0,                  src.width, heightPx);
+    return out;
+}
+
+async function exportPivotPDF() {
     const table = document.getElementById('pivotTable');
-    if (table.style.display === 'none') { alert('Generate a pivot table first.'); return; }
+    if (!table || table.style.display === 'none') { alert('Generate a pivot table first.'); return; }
     const title = document.getElementById('pivotTitle').value || 'Pivot Report';
 
+    const orientEl = document.getElementById('ptPdfOrientation');
+    const orientation = (orientEl && orientEl.value === 'portrait') ? 'portrait' : 'landscape';
+
     const { jsPDF } = window.jspdf;
-    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    const PAGE_W  = orientation === 'landscape' ? 297 : 210;
+    const PAGE_H  = orientation === 'landscape' ? 210 : 297;
+    const MARGIN  = 10;
+    const FTR_H   = 8;
+    const AVAIL_W = PAGE_W - 2 * MARGIN;
 
-    doc.setFontSize(14);
-    doc.text(title, 14, 15);
-    doc.setFontSize(8);
-    doc.text(`Generated: ${new Date().toLocaleString()}`, 14, 21);
+    // ── Compute dynamic header height based on title wrapping ──
+    const TITLE_FONT_SZ = 12;
+    const TITLE_LINE_H  = TITLE_FONT_SZ * 0.352778 * 1.4; // pt → mm with line spacing
+    // Measure using a temporary doc so we know how many lines the title needs
+    const _tmpDoc = new jsPDF({ orientation, unit: 'mm', format: 'a4' });
+    _tmpDoc.setFontSize(TITLE_FONT_SZ);
+    const titleLines = _tmpDoc.splitTextToSize(title, AVAIL_W - 30); // -30 leaves room for "(Continued)"
+    const HDR_H = Math.max(18, 5 + titleLines.length * TITLE_LINE_H + 3);
 
-    const rows = table.querySelectorAll('tr');
-    const head = [];
-    const body = [];
-    rows.forEach((row, ri) => {
-        const cells = Array.from(row.cells).map(c => c.textContent);
-        if (ri === 0) head.push(cells);
-        else body.push(cells);
+    const AVAIL_H = PAGE_H - HDR_H - MARGIN - FTR_H;
+
+    const SCALE = 2;
+
+    // ── 1. Measure each tbody row's pixel position relative to the table top BEFORE
+    //       html2canvas runs, so we know exact row boundaries for page-break snapping. ──
+    const outer = document.getElementById('pivotTableOuter');
+    if (outer) { outer.scrollTop = 0; outer.scrollLeft = 0; }
+
+    const tableRect = table.getBoundingClientRect();
+    const bodyRows  = Array.from(document.querySelectorAll('#pivotTableBody tr'));
+    // rowBounds in canvas pixels (table-relative, scaled by SCALE)
+    const rowBounds = bodyRows.map(tr => {
+        const r = tr.getBoundingClientRect();
+        return {
+            top:    Math.round((r.top    - tableRect.top) * SCALE),
+            bottom: Math.round((r.bottom - tableRect.top) * SCALE)
+        };
     });
 
-    if (doc.autoTable) {
-        doc.autoTable({
-            head, body, startY: 25,
-            styles: { fontSize: 6, cellPadding: 2, halign: 'center', valign: 'middle', lineWidth: 0.2, lineColor: [180, 83, 9] },
-            headStyles: { fillColor: [217, 119, 6], halign: 'center', valign: 'middle', fontStyle: 'bold' },
-            bodyStyles: { halign: 'center', valign: 'middle' },
-            columnStyles: { 0: { halign: 'left' } }
-        });
-    } else {
-        simpleTablePDF(doc, head[0], body, 25);
+    // ── 2. Capture full table + thead separately ──
+    const fullCanvas = await html2canvas(table, {
+        scale: SCALE, backgroundColor: '#ffffff', useCORS: true, scrollY: 0
+    });
+    const theadEl = document.getElementById('pivotTableHead');
+    const theadCanvas = await html2canvas(theadEl, {
+        scale: SCALE, backgroundColor: '#7b1c00', useCORS: true
+    });
+
+    const mmPerPx       = AVAIL_W / fullCanvas.width;
+    const theadH_mm     = theadCanvas.height * mmPerPx;
+    const theadH_px     = theadCanvas.height;
+    const bodyPerPage_mm = AVAIL_H - theadH_mm;
+    const bodyPerPage_px = Math.round(bodyPerPage_mm / mmPerPx);
+    const totalBody_px  = fullCanvas.height - theadH_px;
+
+    // ── 3. Build row-boundary-aware page breaks ──
+    // All positions below are in "body pixel space": 0 = first pixel of tbody in the canvas.
+    // We scan rowBounds (which are table-relative canvas pixels) and convert via: bodyPx = rb.top - theadH_px
+    const pageBreaks = []; // [{ start, end }] in body pixel space
+    let cursor = 0;
+
+    while (cursor < totalBody_px) {
+        let pageEnd = cursor;
+
+        for (const rb of rowBounds) {
+            const rTop    = rb.top    - theadH_px;   // row top in body pixel space
+            const rBottom = rb.bottom - theadH_px;   // row bottom in body pixel space
+            if (rBottom <= cursor) continue;          // already placed on a previous page
+            if (rTop >= cursor + bodyPerPage_px) break; // starts beyond this page capacity
+
+            if (rBottom <= cursor + bodyPerPage_px) {
+                pageEnd = rBottom;   // row fits completely — extend page end to include it
+            } else {
+                break;               // row would be cut — leave it for the next page
+            }
+        }
+
+        // Safety: if not even one complete row fits (very tall row), force-include that row
+        // to prevent an infinite loop.
+        if (pageEnd <= cursor) {
+            for (const rb of rowBounds) {
+                const rBottom = rb.bottom - theadH_px;
+                if (rBottom > cursor) { pageEnd = rBottom; break; }
+            }
+            if (pageEnd <= cursor) pageEnd = Math.min(cursor + bodyPerPage_px, totalBody_px);
+        }
+
+        pageEnd = Math.min(pageEnd, totalBody_px);
+        pageBreaks.push({ start: cursor, end: pageEnd });
+        cursor = pageEnd;
     }
+
+    if (!pageBreaks.length) pageBreaks.push({ start: 0, end: totalBody_px });
+
+    // ── 4. Chrome helper (maroon band + gold line + footer) ──
+    const totalPages = pageBreaks.length;
+    function drawChrome(doc, pageNum) {
+        doc.setFillColor(123, 28, 0);
+        doc.rect(0, 0, PAGE_W, HDR_H, 'F');
+        // Draw wrapped title lines centred inside the band
+        doc.setFontSize(TITLE_FONT_SZ);
+        doc.setTextColor(212, 175, 55);
+        const firstLineY = 5 + TITLE_LINE_H;
+        titleLines.forEach((line, i) => {
+            doc.text(line, PAGE_W / 2, firstLineY + i * TITLE_LINE_H, { align: 'center' });
+        });
+        if (pageNum > 1) {
+            doc.setFontSize(8); doc.setTextColor(255, 215, 90);
+            doc.text('(Continued)', PAGE_W - MARGIN, firstLineY, { align: 'right' });
+        }
+        doc.setDrawColor(200, 134, 10);
+        doc.setLineWidth(0.4);
+        doc.line(MARGIN, HDR_H + 1, PAGE_W - MARGIN, HDR_H + 1);
+        doc.setTextColor(150, 80, 0);
+        doc.setFontSize(7);
+        doc.text('© Muddada Ravi Chandra IAS, EO, TTD', PAGE_W / 2, PAGE_H - 4, { align: 'center' });
+        doc.setTextColor(130, 130, 130);
+        doc.text(`Page ${pageNum} of ${totalPages}`, PAGE_W - MARGIN, PAGE_H - 4, { align: 'right' });
+    }
+
+    // ── 5. Render pages ──
+    const doc     = new jsPDF({ orientation, unit: 'mm', format: 'a4' });
+    const tableTop = HDR_H + 3; // mm: below the maroon band
+
+    pageBreaks.forEach(({ start, end }, idx) => {
+        const pageNum = idx + 1;
+        if (pageNum > 1) doc.addPage();
+        drawChrome(doc, pageNum);
+
+        if (pageNum === 1) {
+            // Page 1: crop from table top (pixel 0) down through tbody end of this page
+            const slicePx  = Math.min(theadH_px + end, fullCanvas.height);
+            const sliceImg = _cropCanvas(fullCanvas, 0, slicePx);
+            doc.addImage(sliceImg.toDataURL('image/png'), 'PNG',
+                MARGIN, tableTop, AVAIL_W, slicePx * mmPerPx);
+        } else {
+            // Pages 2+: repeat thead, then the body slice for this page
+            doc.addImage(theadCanvas.toDataURL('image/png'), 'PNG',
+                MARGIN, tableTop, AVAIL_W, theadH_mm);
+            const slicePx = end - start;
+            if (slicePx > 0) {
+                const sliceImg = _cropCanvas(fullCanvas, theadH_px + start, slicePx);
+                doc.addImage(sliceImg.toDataURL('image/png'), 'PNG',
+                    MARGIN, tableTop + theadH_mm, AVAIL_W, slicePx * mmPerPx);
+            }
+        }
+    });
+
     doc.save(title.replace(/[^a-zA-Z0-9]/g, '_') + '.pdf');
 }
 
@@ -1805,15 +2784,19 @@ function generatePivotChart() {
     const agg = document.getElementById('pcAggregation').value;
     const chartType = document.getElementById('pcChartType').value;
     const topN = document.getElementById('pcTopN').value;
-    const title = document.getElementById('pivotChartTitle').value || 'Chart';
-    const xLabel = (document.getElementById('pcXLabel') || {}).value || '';
-    const yLabel = (document.getElementById('pcYLabel') || {}).value || '';
-    const chartColorEl = document.getElementById('pcChartColor');
-    const chartColor = chartColorEl ? chartColorEl.value : '#2563eb';
+    const title        = document.getElementById('pivotChartTitle').value || 'Chart';
+    const xLabel       = (document.getElementById('pcXLabel') || {}).value || '';
+    const yLabel       = (document.getElementById('pcYLabel') || {}).value || '';
+    const chartColor   = (document.getElementById('pcChartColor')    || {}).value || '#2563eb';
+    const titleFontSz  = parseInt((document.getElementById('pcTitleFontSize') || {}).value || '16');
+    const titleFontFam = (document.getElementById('pcTitleFont')     || {}).value || 'inherit';
+    const titleClr     = (document.getElementById('pcTitleColor')    || {}).value || '#1c1917';
+    const labelFontSz  = parseInt((document.getElementById('pcLabelFontSize') || {}).value || '11');
+    const labelClr     = (document.getElementById('pcLabelColor')    || {}).value || '#6b3a00';
 
     // Apply unified filters (no default is_occupied restriction — user controls via post_status filter)
     const pcFilters = getUnifiedFilterValues('pchart');
-    let data = RAW_DATA.filter(r => passesFilters(r, pcFilters));
+    let data = getEmpTypeData().filter(r => passesFilters(r, pcFilters));
 
     if (!category) { alert('Please select a Category field.'); return; }
 
@@ -1836,23 +2819,22 @@ function generatePivotChart() {
         return String(r[field] || 'N/A');
     }
 
-    // Build axis scale config with optional title labels
+    // Build axis scale config with optional title labels and user font/color settings
     function buildScales(stacked) {
         if (isPie) return {};
-        const axisColor = '#6b3a00';
         const gridColor = '#e8b86d';
         return {
             x: {
                 stacked,
-                ticks: { color: axisColor, font: { size: 10 } },
+                ticks: { color: labelClr, font: { size: labelFontSz } },
                 grid: { color: gridColor },
-                title: xLabel ? { display: true, text: xLabel, color: axisColor, font: { size: 12, weight: '600' } } : { display: false }
+                title: xLabel ? { display: true, text: xLabel, color: labelClr, font: { size: labelFontSz + 1, weight: '600' } } : { display: false }
             },
             y: {
                 stacked,
-                ticks: { color: axisColor, font: { size: 10 } },
+                ticks: { color: labelClr, font: { size: labelFontSz } },
                 grid: { color: gridColor },
-                title: yLabel ? { display: true, text: yLabel, color: axisColor, font: { size: 12, weight: '600' } } : { display: false }
+                title: yLabel ? { display: true, text: yLabel, color: labelClr, font: { size: labelFontSz + 1, weight: '600' } } : { display: false }
             }
         };
     }
@@ -1896,8 +2878,8 @@ function generatePivotChart() {
                 scales: buildScales(isStacked),
                 plugins: {
                     ...chartOptions(title).plugins,
-                    title: { display: true, text: title, color: '#1c1917', font: { size: 16, weight: '700' } },
-                    legend: { display: isPie, position: 'right', labels: { color: '#78716c' } }
+                    title: { display: true, text: title, color: titleClr, font: { size: titleFontSz, weight: '700', family: titleFontFam } },
+                    legend: { display: isPie, position: 'right', labels: { color: labelClr, font: { size: labelFontSz } } }
                 }
             }
         });
@@ -1944,8 +2926,8 @@ function generatePivotChart() {
                 scales: buildScales(isStacked),
                 plugins: {
                     ...chartOptions(title).plugins,
-                    title: { display: true, text: title, color: '#1c1917', font: { size: 16, weight: '700' } },
-                    legend: { display: true, position: 'top', labels: { color: '#78716c' } }
+                    title: { display: true, text: title, color: titleClr, font: { size: titleFontSz, weight: '700', family: titleFontFam } },
+                    legend: { display: true, position: 'top', labels: { color: labelClr, font: { size: labelFontSz } } }
                 }
             }
         });
@@ -2005,27 +2987,38 @@ function exportPivotChartPDF() {
     const pageH = 210;
     const margin = 12;
 
+    // ── Dynamic header height based on title wrapping ──
+    const CHART_TITLE_SZ  = 15;
+    const CHART_TITLE_LH  = CHART_TITLE_SZ * 0.352778 * 1.4; // pt → mm with line spacing
+    doc.setFontSize(CHART_TITLE_SZ);
+    const chartTitleLines = doc.splitTextToSize(title, pageW - 2 * margin);
+    const hdrH = Math.max(22, 4 + chartTitleLines.length * CHART_TITLE_LH + 6); // +6 for subtitle
+
     // Header background
     doc.setFillColor(123, 28, 0);
-    doc.rect(0, 0, pageW, 22, 'F');
+    doc.rect(0, 0, pageW, hdrH, 'F');
 
-    // Title
-    doc.setFontSize(15);
+    // Wrapped title lines
+    doc.setFontSize(CHART_TITLE_SZ);
     doc.setTextColor(245, 200, 66);
-    doc.text(title, pageW / 2, 10, { align: 'center' });
+    const chartTitleStartY = 4 + CHART_TITLE_LH;
+    chartTitleLines.forEach((line, i) => {
+        doc.text(line, pageW / 2, chartTitleStartY + i * CHART_TITLE_LH, { align: 'center' });
+    });
 
-    // Subtitle
+    // Subtitle — placed below last title line
+    const subtitleY = chartTitleStartY + (chartTitleLines.length - 1) * CHART_TITLE_LH + 5;
     doc.setFontSize(8);
     doc.setTextColor(255, 235, 180);
-    doc.text('TTD HR Analytics  |  Generated: ' + new Date().toLocaleString(), pageW / 2, 17, { align: 'center' });
+    doc.text('TTD HR Analytics  |  Generated: ' + new Date().toLocaleString(), pageW / 2, subtitleY, { align: 'center' });
 
     // Gold separator line
     doc.setDrawColor(200, 134, 10);
     doc.setLineWidth(0.8);
-    doc.line(margin, 23, pageW - margin, 23);
+    doc.line(margin, hdrH + 1, pageW - margin, hdrH + 1);
 
     // Chart image — fit within remaining space
-    const imgY = 26;
+    const imgY = hdrH + 4;
     const availH = pageH - imgY - margin;
     const availW = pageW - 2 * margin;
     const aspect = exp.width / exp.height;
@@ -2155,7 +3148,7 @@ function searchServiceRecords() {
     const container = document.getElementById('serviceResults');
 
     // Find matching employees
-    const matches = RAW_DATA.filter(r => {
+    const matches = getEmpTypeData().filter(r => {
         if (!r.is_occupied) return false;
         const id = String(r.emp_id || '').toLowerCase();
         const name = String(r.emp_name || '').toLowerCase();
