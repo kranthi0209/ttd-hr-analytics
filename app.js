@@ -2764,6 +2764,32 @@ async function exportPivotPDF() {
     doc.save(title.replace(/[^a-zA-Z0-9]/g, '_') + '.pdf');
 }
 
+// ── Fullscreen toggle ──
+function toggleFullscreen() {
+    const btn = document.getElementById('btnFullscreen');
+    if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(() => {});
+        if (btn) btn.textContent = '✕';
+        if (btn) btn.title = 'Exit Fullscreen';
+    } else {
+        document.exitFullscreen().catch(() => {});
+        if (btn) btn.textContent = '⛶';
+        if (btn) btn.title = 'Toggle Fullscreen';
+    }
+}
+document.addEventListener('fullscreenchange', () => {
+    const btn = document.getElementById('btnFullscreen');
+    if (!btn) return;
+    if (document.fullscreenElement) { btn.textContent = '✕'; btn.title = 'Exit Fullscreen'; }
+    else { btn.textContent = '⛶'; btn.title = 'Toggle Fullscreen'; }
+});
+
+// ── Apply BG color to chart container live ──
+function applyChartBg(color) {
+    const container = document.getElementById('pivotChartContainer');
+    if (container) container.style.background = color;
+}
+
 // ──────────────────────────────────────────────────────────────
 //   PIVOT CHART PAGE
 // ──────────────────────────────────────────────────────────────
@@ -2794,9 +2820,29 @@ function generatePivotChart() {
     const labelFontSz  = parseInt((document.getElementById('pcLabelFontSize') || {}).value || '11');
     const labelClr     = (document.getElementById('pcLabelColor')    || {}).value || '#6b3a00';
 
-    // Apply unified filters (no default is_occupied restriction — user controls via post_status filter)
+    // Post Status filter
+    const pcPsOccupied = document.getElementById('pcPsOccupied');
+    const pcPsVacant   = document.getElementById('pcPsVacant');
+    const pcShowOcc    = !pcPsOccupied || pcPsOccupied.checked;
+    const pcShowVac    = pcPsVacant && pcPsVacant.checked;
+
     const pcFilters = getUnifiedFilterValues('pchart');
-    let data = getEmpTypeData().filter(r => passesFilters(r, pcFilters));
+    let data = getEmpTypeData().filter(r => {
+        if (!passesFilters(r, pcFilters)) return false;
+        if (r.post_status === 'occupied') return pcShowOcc;
+        if (r.post_status === 'vacant')   return pcShowVac;
+        return false;
+    });
+
+    // BG color applied live to container
+    const bgColor = (document.getElementById('pcBgColor') || {}).value || '#fefce8';
+    applyChartBg(bgColor);
+
+    // Multi-color & data-labels options
+    const multiColor      = !!(document.getElementById('pcMultiColor') || {}).checked;
+    const showDataLabels  = !!(document.getElementById('pcShowDataLabels') || {}).checked;
+    const dataLabelSz     = parseInt((document.getElementById('pcDataLabelSize') || {}).value || '11');
+    const dataLabelMode   = (document.getElementById('pcDataLabelMode') || {}).value || 'count';
 
     if (!category) { alert('Please select a Category field.'); return; }
 
@@ -2859,15 +2905,30 @@ function generatePivotChart() {
         const values = entries.map(e => e[1]);
         const colors = isPie ? getColors(labels.length) : null;
 
+        const total = values.reduce((s, v) => s + v, 0);
+        const dlFormatter = (value) => {
+            const pct = total > 0 ? Math.round(value / total * 100) + '%' : '0%';
+            if (dataLabelMode === 'pct') return pct;
+            if (dataLabelMode === 'both') return value + '\n' + pct;
+            return value;
+        };
+        const dlConfig = showDataLabels
+            ? { display: true, color: labelClr, font: { size: dataLabelSz, weight: '600' }, formatter: dlFormatter,
+                anchor: isPie ? 'center' : 'end', align: isPie ? 'center' : 'end', clamp: true }
+            : { display: false };
+        const bgColors = multiColor && !isPie ? getColors(values.length).map(c => c + 'bb') : (isPie ? colors : chartColor + 'bb');
+        const bdColors = multiColor && !isPie ? getColors(values.length) : (isPie ? colors : chartColor);
+
         pivotChartInstance = new Chart(canvas, {
+            plugins: [window.ChartDataLabels].filter(Boolean),
             type: (isHorizontal || isStacked) ? 'bar' : chartType,
             data: {
                 labels,
                 datasets: [{
                     label: title,
                     data: values,
-                    backgroundColor: isPie ? colors : chartColor + 'bb',
-                    borderColor: isPie ? colors : chartColor,
+                    backgroundColor: bgColors,
+                    borderColor: bdColors,
                     borderWidth: 1,
                     borderRadius: isPie ? 0 : 4
                 }]
@@ -2879,7 +2940,8 @@ function generatePivotChart() {
                 plugins: {
                     ...chartOptions(title).plugins,
                     title: { display: true, text: title, color: titleClr, font: { size: titleFontSz, weight: '700', family: titleFontFam } },
-                    legend: { display: isPie, position: 'right', labels: { color: labelClr, font: { size: labelFontSz } } }
+                    legend: { display: isPie, position: 'right', labels: { color: labelClr, font: { size: labelFontSz } } },
+                    datalabels: dlConfig
                 }
             }
         });
@@ -2917,7 +2979,27 @@ function generatePivotChart() {
             borderRadius: isStacked ? 0 : 3
         }));
 
+        const dlFormatterGrouped = (value) => {
+            if (dataLabelMode === 'pct') {
+                const ds = datasets.find(d => d.data.includes(value));
+                const dsTotal = ds ? ds.data.reduce((s, v) => s + v, 0) : 1;
+                return dsTotal > 0 ? Math.round(value / dsTotal * 100) + '%' : '0%';
+            }
+            if (dataLabelMode === 'both') {
+                const ds = datasets.find(d => d.data.includes(value));
+                const dsTotal = ds ? ds.data.reduce((s, v) => s + v, 0) : 1;
+                const pct = dsTotal > 0 ? Math.round(value / dsTotal * 100) + '%' : '0%';
+                return value + '\n' + pct;
+            }
+            return value;
+        };
+        const dlConfigGrouped = showDataLabels
+            ? { display: true, color: labelClr, font: { size: dataLabelSz, weight: '600' },
+                formatter: dlFormatterGrouped, anchor: 'end', align: 'end', clamp: true }
+            : { display: false };
+
         pivotChartInstance = new Chart(canvas, {
+            plugins: [window.ChartDataLabels].filter(Boolean),
             type: 'bar',
             data: { labels, datasets },
             options: {
@@ -2927,7 +3009,8 @@ function generatePivotChart() {
                 plugins: {
                     ...chartOptions(title).plugins,
                     title: { display: true, text: title, color: titleClr, font: { size: titleFontSz, weight: '700', family: titleFontFam } },
-                    legend: { display: true, position: 'top', labels: { color: labelClr, font: { size: labelFontSz } } }
+                    legend: { display: true, position: 'top', labels: { color: labelClr, font: { size: labelFontSz } } },
+                    datalabels: dlConfigGrouped
                 }
             }
         });

@@ -9,6 +9,7 @@
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&display=swap" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-datalabels/2.2.0/chartjs-plugin-datalabels.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -67,6 +68,9 @@
             </div>
         </div>
     </nav>
+
+    <!-- Fullscreen Toggle -->
+    <button id="btnFullscreen" class="btn-fullscreen" title="Toggle Fullscreen" onclick="toggleFullscreen()">⛶</button>
 
     <!-- Mobile Header -->
     <header class="mobile-header" id="mobileHeader">
@@ -203,7 +207,7 @@
                     <div class="chart-body"><canvas id="chartRecruitment"></canvas></div>
                 </div>
                 <div class="chart-card">
-                    <div class="chart-header"><h3>Joined During (Govt Rule)</h3></div>
+                    <div class="chart-header"><h3>Joined in TTD During (Govt Rule)</h3></div>
                     <div class="chart-body"><canvas id="chartJoined"></canvas></div>
                 </div>
                 <div class="chart-card large">
@@ -219,11 +223,11 @@
                     <div class="chart-body"><canvas id="chartDesignations"></canvas></div>
                 </div>
                 <div class="chart-card">
-                    <div class="chart-header"><h3>Posted During (Govt. Rule)</h3></div>
+                    <div class="chart-header"><h3>Joined in Present Post in the year</h3></div>
                     <div class="chart-body"><canvas id="chartPostedDuring"></canvas></div>
                 </div>
                 <div class="chart-card">
-                    <div class="chart-header"><h3>Present Post Posted In</h3></div>
+                    <div class="chart-header"><h3>Present Post Posted During</h3></div>
                     <div class="chart-body"><canvas id="chartPostedBy"></canvas></div>
                 </div>
             </div>
@@ -543,18 +547,33 @@
                     </div>
                 </div>
                 <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px solid var(--border-color)">
+                    <!-- Post Status -->
+                    <div class="pivot-ps-group">
+                        <span class="pivot-ps-label">Post Status:</span>
+                        <label class="pivot-ps-chip">
+                            <input type="checkbox" id="pcPsOccupied" checked>
+                            <span class="pivot-ps-pill occupied">Occupied</span>
+                        </label>
+                        <label class="pivot-ps-chip">
+                            <input type="checkbox" id="pcPsVacant">
+                            <span class="pivot-ps-pill vacant">Vacant</span>
+                        </label>
+                    </div>
                     <span style="font-size:0.85rem;font-weight:600;color:var(--text-secondary)">🔍 Chart Filters:</span>
                     <div class="column-toggle-container">
                         <button class="btn btn-outline btn-sm" id="pcSelectFiltersBtn">⚙️ Select Filters</button>
                         <div class="column-toggle-dropdown" id="pcSelectFiltersDropdown"></div>
                     </div>
                     <button class="btn btn-ghost btn-sm" id="pcClearFilters">Clear</button>
-                    <span style="font-size:0.85rem;font-weight:600;color:var(--text-secondary);margin-left:8px">🎨 Chart Colors:</span>
+                    <span style="font-size:0.85rem;font-weight:600;color:var(--text-secondary);margin-left:8px">🎨 Colors:</span>
                     <label style="font-size:0.8rem;color:var(--text-muted);display:flex;align-items:center;gap:4px">
                         Chart Color <input type="color" id="pcChartColor" value="#2563eb" style="width:32px;height:24px;border:none;cursor:pointer;border-radius:4px;padding:1px">
                     </label>
                     <label style="font-size:0.8rem;color:var(--text-muted);display:flex;align-items:center;gap:4px">
-                        Export BG <input type="color" id="pcBgColor" value="#fefce8" style="width:32px;height:24px;border:none;cursor:pointer;border-radius:4px;padding:1px">
+                        BG Color <input type="color" id="pcBgColor" value="#fefce8" style="width:32px;height:24px;border:none;cursor:pointer;border-radius:4px;padding:1px" oninput="applyChartBg(this.value)">
+                    </label>
+                    <label style="font-size:0.8rem;color:var(--text-muted);display:flex;align-items:center;gap:4px;cursor:pointer">
+                        <input type="checkbox" id="pcMultiColor"> Multi-color
                     </label>
                     <span style="font-size:0.85rem;font-weight:600;color:var(--text-secondary);margin-left:8px">🔤 Fonts:</span>
                     <label style="font-size:0.8rem;color:var(--text-muted);display:flex;align-items:center;gap:4px">
@@ -578,6 +597,20 @@
                     </label>
                     <label style="font-size:0.8rem;color:var(--text-muted);display:flex;align-items:center;gap:4px">
                         Label Color <input type="color" id="pcLabelColor" value="#6b3a00" style="width:32px;height:24px;border:none;cursor:pointer;border-radius:4px;padding:1px">
+                    </label>
+                    <span style="font-size:0.85rem;font-weight:600;color:var(--text-secondary);margin-left:8px">🏷️ Data Labels:</span>
+                    <label style="font-size:0.8rem;color:var(--text-muted);display:flex;align-items:center;gap:4px;cursor:pointer">
+                        <input type="checkbox" id="pcShowDataLabels"> Show Labels
+                    </label>
+                    <label style="font-size:0.8rem;color:var(--text-muted);display:flex;align-items:center;gap:4px">
+                        Size <input type="number" id="pcDataLabelSize" value="11" min="7" max="20" style="width:46px;height:24px;padding:2px 5px;border:1px solid var(--border-color);border-radius:4px;font-size:0.78rem">
+                    </label>
+                    <label style="font-size:0.8rem;color:var(--text-muted);display:flex;align-items:center;gap:4px">
+                        <select id="pcDataLabelMode" style="height:26px;font-size:0.78rem;padding:2px 5px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-card)">
+                            <option value="count" selected>Count</option>
+                            <option value="pct">Percentage</option>
+                            <option value="both">Count + %</option>
+                        </select>
                     </label>
                 </div>
                 <div class="filters-grid" id="pcFiltersGrid" style="margin-top:8px"></div>
