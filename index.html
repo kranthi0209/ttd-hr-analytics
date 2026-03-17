@@ -239,7 +239,19 @@
             <div class="filters-bar" id="tableFilters">
                 <div class="filters-header">
                     <h3>🔍 Filters</h3>
-                    <div style="display:flex;gap:8px;align-items:center">
+                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                        <!-- Post Status selector -->
+                        <div class="pivot-ps-group">
+                            <span class="pivot-ps-label">Post Status:</span>
+                            <label class="pivot-ps-chip">
+                                <input type="checkbox" id="dtPsOccupied" checked>
+                                <span class="pivot-ps-pill occupied">Occupied</span>
+                            </label>
+                            <label class="pivot-ps-chip">
+                                <input type="checkbox" id="dtPsVacant">
+                                <span class="pivot-ps-pill vacant">Vacant</span>
+                            </label>
+                        </div>
                         <div class="column-toggle-container">
                             <button class="btn btn-outline btn-sm" id="tableSelectFiltersBtn">⚙️ Select Filters</button>
                             <div class="column-toggle-dropdown" id="tableSelectFiltersDropdown"></div>

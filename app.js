@@ -18,6 +18,7 @@ let visibleColumns = {};
 let tableFilteredData = [];
 
 const TABLE_COLUMNS = [
+    { key: 'photo', label: 'Photo', show: false, noExport: true },
     { key: 'emp_id', label: 'Emp ID', show: true },
     { key: 'emp_name', label: 'Employee Name', show: true },
     { key: 'designation_name', label: 'Designation', show: true },
@@ -403,7 +404,13 @@ function populateFilters() {
         document.getElementById('fTableServiceMax').value = 40;
         document.getElementById('fTableServiceMinVal').textContent = '0';
         document.getElementById('fTableServiceMaxVal').textContent = '40';
+        document.getElementById('dtPsOccupied').checked = true;
+        document.getElementById('dtPsVacant').checked = false;
+        applyTableFilters();
     });
+
+    document.getElementById('dtPsOccupied').addEventListener('change', applyTableFilters);
+    document.getElementById('dtPsVacant').addEventListener('change', applyTableFilters);
 
     document.getElementById('fTableSearch').addEventListener('input', debounce(applyTableFilters, 300));
 }
@@ -1518,7 +1525,14 @@ function applyTableFilters() {
     const svcMax = parseInt(document.getElementById('fTableServiceMax').value) || 40;
     const filters = getUnifiedFilterValues('table');
 
+    const dtPsOccupied = document.getElementById('dtPsOccupied');
+    const dtPsVacant   = document.getElementById('dtPsVacant');
+    const dtShowOcc    = !dtPsOccupied || dtPsOccupied.checked;
+    const dtShowVac    = dtPsVacant && dtPsVacant.checked;
+
     tableFilteredData = getEmpTypeData().filter(r => {
+        if (r.post_status === 'occupied' && !dtShowOcc) return false;
+        if (r.post_status === 'vacant'   && !dtShowVac) return false;
         if (!passesFilters(r, filters)) return false;
         if (r.is_occupied && r.service_years_current_post != null) {
             if (r.service_years_current_post < svcMin || r.service_years_current_post > svcMax) return false;
@@ -1547,20 +1561,26 @@ function applyTableFilters() {
 
 function renderTable() {
     const cols = TABLE_COLUMNS.filter(c => visibleColumns[c.key]);
+    const hasPhotoCol = cols.some(c => c.key === 'photo');
     const ps = parseInt(document.getElementById('pageSize').value);
     const totalPages = Math.max(1, Math.ceil(tableFilteredData.length / ps));
     if (currentPage > totalPages) currentPage = totalPages;
     const start = (currentPage - 1) * ps;
     const pageData = tableFilteredData.slice(start, start + ps);
 
+    // Toggle photo-row class on table
+    const tableEl = document.getElementById('dataTable');
+    tableEl.classList.toggle('table-photo-rows', hasPhotoCol);
+
     // Header
     const thead = document.getElementById('dataTableHead');
     thead.innerHTML = '<tr>' + cols.map(c => {
+        if (c.key === 'photo') return `<th class="photo-th">Photo</th>`;
         const icon = sortCol === c.key ? (sortDir === 'asc' ? '▲' : '▼') : '⇅';
         return `<th data-col="${c.key}">${c.label} <span class="sort-icon">${icon}</span></th>`;
     }).join('') + '</tr>';
 
-    thead.querySelectorAll('th').forEach(th => {
+    thead.querySelectorAll('th[data-col]').forEach(th => {
         th.addEventListener('click', () => {
             const col = th.dataset.col;
             if (sortCol === col) sortDir = sortDir === 'asc' ? 'desc' : 'asc';
@@ -1573,6 +1593,9 @@ function renderTable() {
     const tbody = document.getElementById('dataTableBody');
     tbody.innerHTML = pageData.map(r => {
         return `<tr data-empid="${r.emp_id}">` + cols.map(c => {
+            if (c.key === 'photo') {
+                return `<td class="photo-td">${_empPhotoHtml(r.emp_id, r.gender, true)}</td>`;
+            }
             let val = r[c.key];
             if (val == null || val === '' || val === 'null' || val === 'None') val = '—';
             if (c.key === 'post_status') {
@@ -1600,7 +1623,7 @@ function renderTable() {
 
 // ── Table Export ──
 function exportTableExcel() {
-    const cols = TABLE_COLUMNS.filter(c => visibleColumns[c.key]);
+    const cols = TABLE_COLUMNS.filter(c => visibleColumns[c.key] && !c.noExport);
     const wsData = [cols.map(c => c.label)];
     tableFilteredData.forEach(r => {
         wsData.push(cols.map(c => {
@@ -1618,7 +1641,7 @@ function exportTableExcel() {
 function exportTablePDF() {
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-    const cols = TABLE_COLUMNS.filter(c => visibleColumns[c.key]);
+    const cols = TABLE_COLUMNS.filter(c => visibleColumns[c.key] && !c.noExport);
 
     doc.setFontSize(14);
     doc.text('TTD Employee Data Report', 14, 15);
@@ -3121,6 +3144,66 @@ function exportPivotChartPDF() {
 }
 
 // ──────────────────────────────────────────────────────────────
+//   SERVICE DURATION HELPERS
+// ──────────────────────────────────────────────────────────────
+
+// March 14 2026 is the data cut-off date — treat as "today"
+function _isDataCutoff(epochMs) {
+    if (!epochMs) return false;
+    const d = new Date(epochMs);
+    return d.getFullYear() === 2026 && d.getMonth() === 2 && d.getDate() === 14;
+}
+
+function _serviceDuration(fromMs, toMs) {
+    if (!fromMs) return '—';
+    const from = new Date(fromMs);
+    const to   = toMs ? new Date(toMs) : new Date();
+    let years  = to.getFullYear() - from.getFullYear();
+    let months = to.getMonth()    - from.getMonth();
+    if (to.getDate() < from.getDate()) months--;
+    if (months < 0) { years--; months += 12; }
+    if (years < 0)  return '—';
+    if (years === 0 && months === 0) return '< 1 Month';
+    if (years === 0) return `${months} Month${months !== 1 ? 's' : ''}`;
+    if (months === 0) return `${years} Year${years !== 1 ? 's' : ''}`;
+    return `${years} Year${years !== 1 ? 's' : ''} ${months} Month${months !== 1 ? 's' : ''}`;
+}
+
+// ──────────────────────────────────────────────────────────────
+//   EMPLOYEE PHOTO HELPERS
+// ──────────────────────────────────────────────────────────────
+
+const _PHOTO_EXTS = ['jpg','JPG','jpeg','JPEG','png','PNG','webp'];
+
+function empPhotoTryNext(img, idx, empId, gender) {
+    const next = idx + 1;
+    if (next < _PHOTO_EXTS.length) {
+        img.onerror = () => empPhotoTryNext(img, next, empId, gender);
+        img.src = `Employee_Photos/${empId}.${_PHOTO_EXTS[next]}`;
+    } else {
+        const g = (gender || '').toLowerCase();
+        const isFemale = g === 'female' || g === 'f';
+        const bg    = isFemale ? '#fce7f3' : '#dbeafe';
+        const fill  = isFemale ? '#be185d' : '#1d4ed8';
+        const svgPath = isFemale
+            ? '<circle cx="12" cy="7" r="4"/><path d="M6 21v-1a6 6 0 0 1 12 0v1"/><path d="M9 11.5l1.5 4 1.5-3 1.5 3 1.5-4"/>'
+            : '<circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>';
+        const size = img.dataset.thumbSize === '1' ? 36 : 52;
+        img.outerHTML = `<div class="emp-photo-placeholder" style="background:${bg}">
+            <svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="${fill}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${svgPath}</svg>
+            <span style="color:${fill};font-size:0.7rem;font-weight:700;margin-top:2px">No Photo</span>
+        </div>`;
+    }
+}
+
+function _empPhotoHtml(empId, gender, thumbSize) {
+    const thumb = thumbSize ? ' data-thumb-size="1"' : '';
+    return `<img src="Employee_Photos/${empId}.${_PHOTO_EXTS[0]}" alt="${empId}"${thumb}
+        onerror="empPhotoTryNext(this,0,'${empId}','${gender||''}')"
+        style="width:100%;height:100%;object-fit:cover;object-position:top center;display:block">`;
+}
+
+// ──────────────────────────────────────────────────────────────
 //   EMPLOYEE DETAIL POPUP
 // ──────────────────────────────────────────────────────────────
 
@@ -3129,23 +3212,42 @@ function openEmployeePopup(emp) {
     const title = document.getElementById('empModalTitle');
     const body = document.getElementById('empModalBody');
 
-    title.textContent = (emp.emp_name || '—') + '  —  Employee Details';
+    title.textContent = 'Employee Details';
+
+    const psClass = emp.is_occupied ? 'occupied' : 'vacant';
+    const psLabel = emp.is_occupied ? '✅ Occupied' : '⚠️ Vacant';
+
+    // Photo banner
+    let html = `<div class="emp-photo-banner">
+        <div class="emp-photo-wrap">${_empPhotoHtml(emp.emp_id, emp.gender)}</div>
+        <div class="emp-photo-info">
+            <div class="emp-photo-name">${emp.emp_name || '—'}</div>
+            <div class="emp-photo-desig">${emp.designation_name || '—'}</div>
+            <div class="emp-photo-meta">
+                <span class="emp-photo-badge">${emp.emp_id || ''}</span>
+                <span class="emp-photo-badge ${psClass}">${psLabel}</span>
+                ${emp.gender ? `<span class="emp-photo-badge">${emp.gender}</span>` : ''}
+                ${emp.work_location ? `<span class="emp-photo-badge">📍 ${emp.work_location}</span>` : ''}
+                ${emp.age ? `<span class="emp-photo-badge">Age: ${emp.age} yrs</span>` : ''}
+            </div>
+        </div>
+    </div>`;
 
     const fields = [
         { label: 'Employee ID', val: emp.emp_id },
         { label: 'Employee Name', val: emp.emp_name },
         { label: 'Designation', val: emp.designation_name },
+        { label: 'Post Status', val: emp.is_occupied ? '✅ Occupied' : '⚠️ Vacant' },
+        { label: 'Gender', val: emp.gender },
+        { label: 'Age', val: emp.age ? emp.age + ' years' : null },
         { label: 'Department (HOD)', val: emp.hod_name },
         { label: 'Section Head', val: emp.hos_name },
         { label: 'Section', val: emp.section_name },
-        { label: 'Post Status', val: emp.is_occupied ? '✅ Occupied' : '⚠️ Vacant' },
+        { label: 'Work Location', val: emp.work_location },
         { label: 'Community', val: emp.community },
         { label: 'Sub Community', val: emp.sub_community },
         { label: 'Caste', val: emp.caste },
-        { label: 'Gender', val: emp.gender },
-        { label: 'Work Location', val: emp.work_location },
         { label: 'Date of Birth', val: emp.dob_fmt },
-        { label: 'Age', val: emp.age ? emp.age + ' years' : null },
         { label: 'Date of Joining', val: emp.doj_fmt },
         { label: 'Date of Retirement', val: emp.dor_fmt },
         { label: 'In Present Post Since', val: emp.working_in_present_place_since_fmt },
@@ -3160,7 +3262,7 @@ function openEmployeePopup(emp) {
         { label: 'Mobile', val: emp.mobile }
     ];
 
-    let html = '<div class="emp-details-grid">';
+    html += '<div class="emp-details-grid">';
     fields.forEach(f => {
         const v = f.val && f.val !== 'null' && f.val !== 'None' && f.val !== '' ? f.val : '—';
         html += `<div class="emp-detail-item">
@@ -3179,17 +3281,21 @@ function openEmployeePopup(emp) {
     html += `<div class="emp-service-title">📋 Service History (${services.length} records)</div>`;
     if (services.length > 0) {
         html += `<table class="emp-service-table">
-            <thead><tr><th>#</th><th>Designation</th><th>Office / Place</th><th>From</th><th>To</th></tr></thead>
+            <thead><tr><th>#</th><th>Designation</th><th>Office / Place</th><th>From</th><th>To</th><th>Service</th></tr></thead>
             <tbody>`;
         services.forEach((s, i) => {
-            const fromDate = s.service_from_date ? formatDate(epochToDate(s.service_from_date)) : '—';
-            const toDate = s.service_to_date ? formatDate(epochToDate(s.service_to_date)) : 'Present';
+            const fromDate   = s.service_from_date ? formatDate(epochToDate(s.service_from_date)) : '—';
+            const isPresent  = !s.service_to_date || _isDataCutoff(s.service_to_date);
+            const toDate     = isPresent ? '<span class="svc-today">Till Today</span>' : formatDate(epochToDate(s.service_to_date));
+            const toMs       = isPresent ? Date.now() : s.service_to_date;
+            const duration   = _serviceDuration(s.service_from_date, toMs);
             html += `<tr>
                 <td>${i + 1}</td>
                 <td>${s.designation_name || '—'}</td>
                 <td>${s.service_office || s.place_of_posting || '—'}</td>
                 <td>${fromDate}</td>
                 <td>${toDate}</td>
+                <td><span class="svc-duration">${duration}</span></td>
             </tr>`;
         });
         html += '</tbody></table>';
